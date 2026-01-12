@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Remove core logic from this file; CLI only remains.
+// main.go 仅保留CLI入口，核心逻辑下沉到各模块。
 
 func main() {
 	// log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -23,7 +23,7 @@ func main() {
 	app := &cli.App{
 		Name:  "eBPFDexDumper",
 		Usage: "Dump in-memory DEX and method bytecode or fix dumped DEX files",
-		// Custom help template shows concise top-level info and compact subcommand details
+		// 自定义帮助模板：精简顶层信息并展示子命令详情
 		CustomAppHelpTemplate: `NAME:
    {{.Name}} - {{.Usage}}
 
@@ -94,7 +94,7 @@ OPTIONS:
 						return fmt.Errorf("either --uid or --name must be provided")
 					}
 					if uid == 0 && pkgName != "" {
-						// Resolve UID by package name
+						// 通过包名解析UID，避免用户手动查找
 						resolved, err := LookupUIDByPackageName(pkgName)
 						if err != nil {
 							return err
@@ -103,7 +103,7 @@ OPTIONS:
 						log.Printf("[+] Resolved UID %d from package %q", uid, pkgName)
 					}
 
-					// Optional: remove oat/ to get more complete structures
+					// 可选：删除OAT目录提升DEX结构完整性
 					if cleanOat {
 						if pkgName != "" {
 							RemoveOatDirsForPackage(pkgName)
@@ -174,7 +174,7 @@ OPTIONS:
 			},
 		},
 		Action: func(c *cli.Context) error {
-			// Default to "dump" to keep UX simple when not specifying subcommand
+			// 默认显示帮助，避免误操作
 			return cli.ShowAppHelp(c)
 		},
 	}

@@ -14,14 +14,14 @@ import (
 	"regexp"
 )
 
-// jsonRepairRecord mirrors MethodCodeRecord for reading from JSON
+// jsonRepairRecord 用于从JSON读取修复记录（与MethodCodeRecord一致）
 type jsonRepairRecord struct {
 	Name      string `json:"name"`
 	MethodIdx uint32 `json:"method_idx"`
 	CodeHex   string `json:"code"`
 }
 
-// FixDexDirectory scans an output directory, pairs dex and code.json, and writes *_fix.dex
+// FixDexDirectory 扫描输出目录，匹配dex与code.json并写入修复后的DEX
 func FixDexDirectory(outputDir string) error {
 	// regex like: dex_<begin>_<size>_code.json
 	re := regexp.MustCompile(`^dex_([0-9a-fA-F]+)_([0-9a-fA-F]+)_code\.json$`)
@@ -76,7 +76,7 @@ func FixDexDirectory(outputDir string) error {
 	return nil
 }
 
-// FixOneDex applies JSON code patches into a single dex file and writes to outPath
+// FixOneDex 将JSON中记录的字节码写回单个DEX并输出到outPath
 func FixOneDex(dexPath, jsonPath, outPath string) error {
 	dexBytes, err := os.ReadFile(dexPath)
 	if err != nil {
@@ -154,7 +154,7 @@ func FixOneDex(dexPath, jsonPath, outPath string) error {
 	return nil
 }
 
-// buildMethodCodeOffMap walks class_data to map method_idx -> code_off
+// buildMethodCodeOffMap 扫描class_data并构建 method_idx -> code_off 映射
 func buildMethodCodeOffMap(p *DexParser) (map[uint32]uint32, error) {
 	res := make(map[uint32]uint32)
 	// class_def_item is 32 bytes
@@ -255,7 +255,7 @@ func buildMethodCodeOffMap(p *DexParser) (map[uint32]uint32, error) {
 	return res, nil
 }
 
-// readULEB128 reads ULEB128 from data at pos, returns value and new pos (or -1 on error)
+// readULEB128 从指定位置读取ULEB128，返回数值与新位置（失败返回-1）
 func readULEB128(data []byte, pos int) (uint32, int) {
 	var result uint32
 	var shift uint
@@ -277,12 +277,12 @@ func readULEB128(data []byte, pos int) (uint32, int) {
 	return result, pos
 }
 
-// helper little-endian readers
+// le32 读取小端uint32
 func le32(b []byte) uint32 {
 	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 }
 
-// recalcDexHeader recomputes SHA-1 signature and Adler32 checksum
+// recalcDexHeader 重新计算SHA-1签名与Adler32校验
 func recalcDexHeader(dex []byte) {
 	if len(dex) < 32 {
 		return
