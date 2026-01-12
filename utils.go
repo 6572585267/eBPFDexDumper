@@ -16,6 +16,7 @@ import (
 	"syscall"
 )
 
+// ByteToString 将int8数组转换为字符串并去掉尾部零字节
 func ByteToString(bs []int8) string {
 	ba := make([]byte, 0, len(bs))
 	for _, b := range bs {
@@ -24,6 +25,7 @@ func ByteToString(bs []int8) string {
 	return string(bytes.TrimSpace(bytes.Trim(ba, "\x00")))
 }
 
+// CheckConfig 检查内核配置中是否包含目标字符串（如BTF支持）
 func CheckConfig(targetStr string) bool {
 	file, err := os.Open("/proc/config.gz")
 	if err != nil {
@@ -48,6 +50,7 @@ func CheckConfig(targetStr string) bool {
 	return false
 }
 
+// FindBTFAssets 根据内核版本选择合适的BTF资源文件
 func FindBTFAssets() string {
 	var utsname syscall.Utsname
 	err := syscall.Uname(&utsname)
@@ -66,6 +69,7 @@ func FindBTFAssets() string {
 // LookupUIDByPackageName tries to resolve Android UID by package name.
 // It first parses /data/system/packages.list, and falls back to
 // `cmd package list packages -U` and `dumpsys package <pkg>`.
+// LookupUIDByPackageName 通过包名解析UID，支持多种系统命令回退。
 func LookupUIDByPackageName(pkg string) (uint32, error) {
 	// 1) Try packages.list (requires root). Format: "<pkg> <uid> ..."
 	if f, err := os.Open("/data/system/packages.list"); err == nil {
@@ -135,6 +139,7 @@ func LookupUIDByPackageName(pkg string) (uint32, error) {
 
 // LookupPackagesByUID returns package names that use the given UID.
 // Preferred source: /data/system/packages.list; fallback to `cmd package list packages -U`.
+// LookupPackagesByUID 通过UID反向解析包名列表。
 func LookupPackagesByUID(uid uint32) ([]string, error) {
 	var pkgs []string
 	// 1) packages.list
@@ -191,7 +196,7 @@ func LookupPackagesByUID(uid uint32) ([]string, error) {
 	return nil, fmt.Errorf("no packages found for uid %d", uid)
 }
 
-// pmPathsForPackage returns install APK paths reported by `pm path <pkg>`.
+// pmPathsForPackage 读取 pm path <pkg> 输出的APK路径列表。
 func pmPathsForPackage(pkg string) ([]string, error) {
 	out, err := exec.Command("/system/bin/sh", "-c", fmt.Sprintf("pm path %s", pkg)).Output()
 	if err != nil {
