@@ -59,7 +59,7 @@ type DexDumper struct {
 	executeOffset uint64
 	nterpOffset   uint64
 
-	// 使用sync.Map减少锁竞争
+	// 使用sync.Map减少锁竞争（key: begin<<32 | methodIndex）
 	methodSigCache sync.Map // key: uint64(begin<<32|methodIndex), value: string
 
 	// 记录dex文件大小，便于生成文件名 dex<begin>_<size>_code.json
@@ -103,6 +103,11 @@ func Asset(filename string) ([]byte, error) {
 	}
 	// Fallback to disk for dev/use outside embedding
 	return ioutil.ReadFile(filename)
+}
+
+// methodSigCacheKey 统一生成方法签名缓存key，避免位移魔法数散落
+func methodSigCacheKey(begin uint64, methodIdx uint32) uint64 {
+	return (begin << 32) | uint64(methodIdx)
 }
 
 func SetupManagerOptions() (manager.Options, error) {
@@ -235,6 +240,7 @@ func (dd *DexDumper) setupManager() error {
 					Name: "events",
 				},
 				RingbufMapOptions: manager.RingbufMapOptions{
+					// DEX元信息事件（大小/起始地址等）
 					DataHandler: dd.handleDexEventRingBuf,
 				},
 			},
@@ -243,6 +249,7 @@ func (dd *DexDumper) setupManager() error {
 					Name: "method_events",
 				},
 				RingbufMapOptions: manager.RingbufMapOptions{
+					// 方法执行/字节码事件
 					DataHandler: dd.handleMethodEventRingBuf,
 				},
 			},
@@ -251,6 +258,7 @@ func (dd *DexDumper) setupManager() error {
 					Name: "dex_chunks",
 				},
 				RingbufMapOptions: manager.RingbufMapOptions{
+					// DEX分片数据事件
 					DataHandler: dd.handleDexChunkEventRingBuf,
 				},
 			},
@@ -259,6 +267,7 @@ func (dd *DexDumper) setupManager() error {
 					Name: "read_failures",
 				},
 				RingbufMapOptions: manager.RingbufMapOptions{
+					// 读取失败事件，触发Go侧readRemoteMem兜底
 					DataHandler: dd.handleReadFailureEventRingBuf,
 				},
 			},
@@ -272,12 +281,12 @@ func (dd *DexDumper) setupManager() error {
 
 // Start 启动 DexDumper
 func (dd *DexDumper) Start(ctx context.Context) error {
-	// setup manager
+	// 初始化manager与探针
 	if err := dd.setupManager(); err != nil {
 		return fmt.Errorf("failed to setup manager: %v", err)
 	}
 
-	// init manager with BPF bytecode
+	// 加载BPF字节码
 	options, err := SetupManagerOptions()
 	if err != nil {
 		return fmt.Errorf("failed to setup manager options: %v", err)
@@ -287,7 +296,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to init manager: %v", err)
 	}
 
-	// config filter map
+	// 配置过滤参数
 	configMap, found, err := dd.manager.GetMap("config_map")
 	if err != nil {
 		return fmt.Errorf("failed to get config map: %v", err)
@@ -307,7 +316,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 
 	log.Printf("[+] Filtering on uid %d", dd.uid)
 
-	// start manager
+	// 启动manager并开始接收事件
 	if err := dd.manager.Start(); err != nil {
 		return fmt.Errorf("failed to start manager: %v", err)
 	}
@@ -338,6 +347,7 @@ func (dd *DexDumper) Stop() error {
 	close(dd.methodTaskChan)
 	dd.workerWg.Wait()
 
+	// 最后输出JSON，确保缓存清空
 	dd.flushJSON()
 
 	// 自动修复DEX文件
@@ -444,7 +454,7 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 		methodName = fmt.Sprintf("method_idx_%d", methodHeader.MethodIndex)
 	} else {
 		// 使用sync.Map无锁查询缓存
-		cacheKey := (methodHeader.Begin << 20) | uint64(methodHeader.MethodIndex)
+		cacheKey := methodSigCacheKey(methodHeader.Begin, methodHeader.MethodIndex)
 		if cached, ok := dd.methodSigCache.Load(cacheKey); ok {
 			methodName = cached.(string)
 		} else {
@@ -506,6 +516,7 @@ func (dd *DexDumper) flushJSON() {
 	}
 	dd.dexSizesMu.RUnlock()
 
+	// 按DEX文件分别输出JSON
 	for begin, recs := range records {
 		if len(recs) == 0 {
 			continue
@@ -546,26 +557,71 @@ type dexRecvState struct {
 	buf   []byte
 }
 
+// 限制单个DEX的最大大小，避免异常数据导致内存暴涨
+const maxDexSize = 512 * 1024 * 1024 // 512MB
+
+// saveDexFile 校验DEX有效性后写入文件并缓存解析结果
+func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
+	if len(data) == 0 {
+		log.Printf("Dex data empty for begin=0x%x", begin)
+		return
+	}
+
+	parser, err := NewDexParser(data)
+	if err != nil {
+		log.Printf("Invalid dex data (begin=0x%x): %v", begin, err)
+		return
+	}
+
+	if size != 0 && parser.header.FileSize > size {
+		log.Printf("Dex size mismatch (begin=0x%x): header=%d expect<=%d", begin, parser.header.FileSize, size)
+		return
+	}
+	if int(parser.header.FileSize) > len(data) {
+		log.Printf("Dex data truncated (begin=0x%x): header=%d data=%d", begin, parser.header.FileSize, len(data))
+		return
+	}
+
+	dexCache.AddDexParser(begin, parser)
+
+	fileName := fmt.Sprintf("%s/dex_%x_%x.dex", outputPath, begin, parser.header.FileSize)
+	f, err := os.Create(fileName)
+	if err != nil {
+		log.Printf("Create file failed: %v", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(data[:parser.header.FileSize]); err != nil {
+		log.Printf("Write dexData failed: %v", err)
+		return
+	}
+	log.Printf("Dex file saved to %s, size %d", fileName, parser.header.FileSize)
+}
+
 func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *manager.RingbufMap, mgr *manager.Manager) {
 	if len(data) < int(unsafe.Sizeof(bpfDexChunkEventT{})) {
 		log.Printf("Dex chunk event too short: %d bytes", len(data))
 		return
 	}
 
-	buf := bytes.NewBuffer(data)
 	hdr := bpfDexChunkEventT{}
-	if err := binary.Read(buf, binary.LittleEndian, &hdr); err != nil {
+	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &hdr); err != nil {
 		log.Printf("Read dex chunk header failed: %s", err)
 		return
 	}
-
-	payload := make([]byte, hdr.DataLen)
-	if hdr.DataLen > 0 {
-		if err := binary.Read(buf, binary.LittleEndian, &payload); err != nil {
-			log.Printf("Read dex chunk payload failed: %s", err)
-			return
-		}
+	if hdr.Size == 0 || hdr.Size > maxDexSize {
+		log.Printf("Dex chunk size invalid: begin=0x%x size=%d", hdr.Begin, hdr.Size)
+		return
 	}
+
+	// 直接切片引用ringbuf数据，避免额外分配
+	headerSize := int(unsafe.Sizeof(bpfDexChunkEventT{}))
+	payloadEnd := headerSize + int(hdr.DataLen)
+	if payloadEnd > len(data) {
+		log.Printf("Dex chunk payload out of bounds: %d > %d", payloadEnd, len(data))
+		return
+	}
+	payload := data[headerSize:payloadEnd]
 
 	begin := hdr.Begin
 	dd.pendingDexMu.Lock()
@@ -595,22 +651,7 @@ func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *m
 		delete(dd.pendingDex, begin)
 		dd.pendingDexMu.Unlock()
 
-		if err := dexCache.AddDexFile(begin, dataCopy); err != nil {
-			log.Printf("Failed to add dex file to cache: %v", err)
-		}
-
-		fileName := fmt.Sprintf("%s/dex_%x_%x.dex", outputPath, begin, hdr.Size)
-		f, err := os.Create(fileName)
-		if err != nil {
-			log.Printf("Create file failed: %v", err)
-			return
-		}
-		defer f.Close()
-		if _, err := f.Write(dataCopy); err != nil {
-			log.Printf("Write dexData failed: %v", err)
-			return
-		}
-		log.Printf("Dex file saved to %s, size %d", fileName, len(dataCopy))
+		dd.saveDexFile(begin, hdr.Size, dataCopy)
 		return
 	}
 	dd.pendingDexMu.Unlock()
@@ -636,6 +677,7 @@ func (dd *DexDumper) handleReadFailureEventRingBuf(CPU int, data []byte, ringBuf
 }
 
 func (dd *DexDumper) readRemoteDexFallback(begin uint64, pid uint32, totalSize uint32, startOffset uint32) {
+	// 兜底通过process_vm_readv从目标进程读取DEX
 	buf := make([]byte, totalSize)
 
 	ret := C.readRemoteMem(C.pid_t(pid), unsafe.Pointer(&buf[0]), C.size_t(totalSize),
@@ -660,20 +702,5 @@ func (dd *DexDumper) readRemoteDexFallback(begin uint64, pid uint32, totalSize u
 	dd.dexSizes[begin] = totalSize
 	dd.dexSizesMu.Unlock()
 
-	if err := dexCache.AddDexFile(begin, buf); err != nil {
-		log.Printf("Failed to add dex file to cache: %v", err)
-	}
-
-	fileName := fmt.Sprintf("%s/dex_%x_%x.dex", outputPath, begin, totalSize)
-	f, err := os.Create(fileName)
-	if err != nil {
-		log.Printf("Create file failed: %v", err)
-		return
-	}
-	defer f.Close()
-	if _, err := f.Write(buf); err != nil {
-		log.Printf("Write dexData failed: %v", err)
-		return
-	}
-	log.Printf("Dex file saved to %s (fallback readRemoteMem), size %d", fileName, len(buf))
+	dd.saveDexFile(begin, totalSize, buf)
 }

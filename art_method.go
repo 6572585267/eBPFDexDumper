@@ -30,7 +30,7 @@ type ArtMethod struct {
 	EntryPoint     uintptr // 0x18: void* entry_point_from_quick_compiled_code_
 }
 
-// Dex文件缓存
+// DexFileCache 保存已解析的DEX，避免重复解析
 type DexFileCache struct {
 	mu      sync.RWMutex
 	parsers map[uint64]*DexParser
@@ -40,7 +40,7 @@ var dexCache = &DexFileCache{
 	parsers: make(map[uint64]*DexParser),
 }
 
-// 添加Dex文件到缓存
+// AddDexFile 解析并缓存DEX文件（begin作为key）
 func (cache *DexFileCache) AddDexFile(begin uint64, data []byte) error {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -55,7 +55,14 @@ func (cache *DexFileCache) AddDexFile(begin uint64, data []byte) error {
 	return nil
 }
 
-// 从缓存获取Dex解析器
+// AddDexParser 直接缓存已解析的DexParser，避免重复解析
+func (cache *DexFileCache) AddDexParser(begin uint64, parser *DexParser) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.parsers[begin] = parser
+}
+
+// GetParser 从缓存获取DEX解析器
 func (cache *DexFileCache) GetParser(begin uint64) *DexParser {
 	cache.mu.RLock()
 	defer cache.mu.RUnlock()
@@ -63,7 +70,7 @@ func (cache *DexFileCache) GetParser(begin uint64) *DexParser {
 	return cache.parsers[begin]
 }
 
-// 从远程进程内存读取ArtMethod结构
+// readArtMethodFromRemote 通过process_vm_readv读取ArtMethod结构
 func readArtMethodFromRemote(pid uint32, artMethodPtr uintptr) (*ArtMethod, error) {
 	artMethodData := make([]byte, unsafe.Sizeof(ArtMethod{}))
 
@@ -83,7 +90,7 @@ func readArtMethodFromRemote(pid uint32, artMethodPtr uintptr) (*ArtMethod, erro
 	return artMethod, nil
 }
 
-// 从ArtMethod获取DexFile指针
+// getDexFileFromArtMethod 从ArtMethod链式读取DexFile指针
 func getDexFileFromArtMethod(pid uint32, artMethod *ArtMethod) (uint64, error) {
 	// declaring_class_是GcRoot<mirror::Class>，需要先解引用获取实际的Class指针
 	var classPtr uintptr
@@ -140,7 +147,7 @@ func getDexFileFromArtMethod(pid uint32, artMethod *ArtMethod) (uint64, error) {
 	return begin, nil
 }
 
-// 通过ArtMethod获取方法签名 (实现prettyMethod功能)
+// PrettyMethodFromArtMethod 根据ArtMethod指针生成方法签名
 func PrettyMethodFromArtMethod(pid uint32, artMethodPtr uintptr) (string, error) {
 	// 读取ArtMethod结构
 	artMethod, err := readArtMethodFromRemote(pid, artMethodPtr)
@@ -170,7 +177,7 @@ func PrettyMethodFromArtMethod(pid uint32, artMethodPtr uintptr) (string, error)
 	return methodInfo.PrettyMethod(), nil
 }
 
-// 辅助函数：从shadow frame获取ArtMethod指针
+// getArtMethodFromShadowFrame 从shadow frame获取ArtMethod指针
 func getArtMethodFromShadowFrame(pid uint32, shadowFramePtr uintptr) (uintptr, error) {
 	var artMethodPtr uintptr
 

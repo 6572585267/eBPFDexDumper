@@ -94,7 +94,7 @@ type TypeItem struct {
 	TypeIdx uint16
 }
 
-// DexFile解析器
+// DexFile解析器：负责按需解析dex结构与方法签名
 type DexParser struct {
 	data   []byte
 	header DexHeader
@@ -200,7 +200,7 @@ func (p *DexParser) GetTypeDescriptor(typeIdx uint32) (string, error) {
 	return p.GetString(descriptorIdx)
 }
 
-// 获取方法信息
+// GetMethodInfo 解析method_id与proto信息，组装完整方法签名
 func (p *DexParser) GetMethodInfo(methodIdx uint32) (*MethodInfo, error) {
 	if methodIdx >= p.header.MethodIdsSize {
 		return nil, fmt.Errorf("method index out of bounds: %d", methodIdx)
@@ -324,7 +324,7 @@ func (p *DexParser) getParameterTypes(offset uint32) ([]string, error) {
 	return parameters, nil
 }
 
-// 格式化方法签名 (实现prettyMethod功能) - 优化版本使用strings.Builder
+// PrettyMethod 格式化方法签名（使用strings.Builder减少分配）
 func (info *MethodInfo) PrettyMethod() string {
 	var sb strings.Builder
 	sb.Grow(128) // 预分配空间减少扩容
@@ -363,7 +363,7 @@ func (info *MethodInfo) PrettyMethod() string {
 	return sb.String()
 }
 
-// formatTypeToBuilder 格式化类型描述符到Builder - 高性能版本
+// formatTypeToBuilder 将类型描述符转为可读类型字符串
 func formatTypeToBuilder(sb *strings.Builder, typeDesc string) {
 	switch typeDesc {
 	case "V":
