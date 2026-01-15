@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -44,6 +43,15 @@ type dexDumpHeader = bpfDexEventDataT
 type methodEventHeader = bpfMethodEventDataT
 
 var outputPath string
+
+// decodeStruct 将data中的字节拷贝到结构体中（避免binary.Read开销）
+func decodeStruct(data []byte, out unsafe.Pointer, size int) bool {
+	if len(data) < size {
+		return false
+	}
+	copy(unsafe.Slice((*byte)(out), size), data[:size])
+	return true
+}
 
 // 方法事件处理任务
 type methodTask struct {
@@ -401,10 +409,9 @@ func (dd *DexDumper) methodWorker() {
 
 // handleDexEventRingBuf 处理 Dex 文件事件 (RingBuffer版本)
 func (dd *DexDumper) handleDexEventRingBuf(CPU int, data []byte, ringBuf *manager.RingbufMap, mgr *manager.Manager) {
-	buf := bytes.NewBuffer(data)
 	dexHeader := dexDumpHeader{}
-	if err := binary.Read(buf, binary.LittleEndian, &dexHeader); err != nil {
-		log.Printf("Read dex event failed: %s", err)
+	if !decodeStruct(data, unsafe.Pointer(&dexHeader), int(unsafe.Sizeof(dexDumpHeader{}))) {
+		log.Printf("Read dex event failed")
 		return
 	}
 
@@ -434,9 +441,12 @@ func (dd *DexDumper) handleMethodEventRingBuf(CPU int, data []byte, perfMap *man
 
 // processMethodEvent 实际处理方法事件
 func (dd *DexDumper) processMethodEvent(data []byte) {
-	buf := bytes.NewBuffer(data)
+	headerSize := int(unsafe.Sizeof(methodEventHeader{}))
+	if len(data) < headerSize {
+		return
+	}
 	methodHeader := methodEventHeader{}
-	if err := binary.Read(buf, binary.LittleEndian, &methodHeader); err != nil {
+	if !decodeStruct(data, unsafe.Pointer(&methodHeader), headerSize) {
 		return
 	}
 
@@ -444,10 +454,11 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 	var bytecode []byte
 	if methodHeader.CodeitemSize > 0 {
 		// 根据codeitem_size读取字节码，避免读入无效数据
-		bytecode = make([]byte, methodHeader.CodeitemSize)
-		if err := binary.Read(buf, binary.LittleEndian, &bytecode); err != nil {
+		end := headerSize + int(methodHeader.CodeitemSize)
+		if end > len(data) {
 			return
 		}
+		bytecode = data[headerSize:end]
 	}
 
 	parser := dexCache.GetParser(methodHeader.Begin)
@@ -616,8 +627,8 @@ func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *m
 	}
 
 	hdr := bpfDexChunkEventT{}
-	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &hdr); err != nil {
-		log.Printf("Read dex chunk header failed: %s", err)
+	if !decodeStruct(data, unsafe.Pointer(&hdr), int(unsafe.Sizeof(bpfDexChunkEventT{}))) {
+		log.Printf("Read dex chunk header failed")
 		return
 	}
 	if hdr.Size == 0 || hdr.Size > maxDexSize {
@@ -677,10 +688,9 @@ func (dd *DexDumper) handleReadFailureEventRingBuf(CPU int, data []byte, ringBuf
 		return
 	}
 
-	buf := bytes.NewBuffer(data)
 	failureEvt := bpfDexReadFailureT{}
-	if err := binary.Read(buf, binary.LittleEndian, &failureEvt); err != nil {
-		log.Printf("Read failure event failed: %s", err)
+	if !decodeStruct(data, unsafe.Pointer(&failureEvt), int(unsafe.Sizeof(bpfDexReadFailureT{}))) {
+		log.Printf("Read failure event failed")
 		return
 	}
 
