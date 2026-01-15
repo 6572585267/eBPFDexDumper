@@ -55,6 +55,8 @@ dexdump [命令] [选项]
 - `--auto-fix, -f` - 转储完成后自动修复 DEX 文件（默认值：**true**）
 - `--no-clean-oat` - 禁用自动清理 OAT
 - `--no-auto-fix` - 禁用自动修复 DEX
+- `--auto-stop` - 目标进程退出时自动停止（默认值：**true**）
+- `--no-auto-stop` - 禁用目标退出自动停止
 - `--execute-offset <value>` - art::interpreter::Execute 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 - `--nterp-offset <value>` - ExecuteNterpImpl 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 

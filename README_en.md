@@ -55,6 +55,8 @@ Attach probes to libart and stream DEX/method events. You must provide either `-
 - `--auto-fix, -f` - Automatically fix DEX files after dumping (default: **true**)
 - `--no-clean-oat` - Disable automatic OAT cleaning
 - `--no-auto-fix` - Disable automatic DEX fixing
+- `--auto-stop` - Stop automatically when target process exits (default: **true**)
+- `--no-auto-stop` - Disable automatic stop on target exit
 - `--execute-offset <value>` - Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)
 - `--nterp-offset <value>` - Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)
 

@@ -267,6 +267,47 @@ func RemoveOatDirsByUID(uid uint32) {
 	}
 }
 
+// IsUIDRunning checks if any process with the given UID is currently running.
+func IsUIDRunning(uid uint32) (bool, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false, fmt.Errorf("read /proc: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		statusPath := filepath.Join("/proc", entry.Name(), "status")
+		file, err := os.Open(statusPath)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "Uid:") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				break
+			}
+			realUID, err := strconv.ParseUint(fields[1], 10, 32)
+			if err == nil && uint32(realUID) == uid {
+				_ = file.Close()
+				return true, nil
+			}
+			break
+		}
+		_ = file.Close()
+	}
+	return false, nil
+}
+
 func findPatternUAddrs(path string, pattern []byte) ([]uint64, error) {
 	f, err := elf.Open(path)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	cli "github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
@@ -74,6 +75,8 @@ OPTIONS:
 					&cli.BoolFlag{Name: "no-auto-fix", Usage: "Disable automatic DEX fixing"},
 					&cli.Uint64Flag{Name: "execute-offset", Usage: "Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)"},
 					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
+					&cli.BoolFlag{Name: "auto-stop", Usage: "Stop automatically when target process exits", Value: true},
+					&cli.BoolFlag{Name: "no-auto-stop", Usage: "Disable automatic stop on target exit"},
 				},
 				Action: func(c *cli.Context) error {
 					fmt.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
@@ -87,6 +90,7 @@ OPTIONS:
 					autoFix := c.Bool("auto-fix") && !c.Bool("no-auto-fix")
 					executeOffset := c.Uint64("execute-offset")
 					nterpOffset := c.Uint64("nterp-offset")
+					autoStop := c.Bool("auto-stop") && !c.Bool("no-auto-stop")
 
 					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -120,6 +124,30 @@ OPTIONS:
 
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
+
+					if autoStop && uid != 0 {
+						go func() {
+							ticker := time.NewTicker(1 * time.Second)
+							defer ticker.Stop()
+							for {
+								select {
+								case <-ctx.Done():
+									return
+								case <-ticker.C:
+									running, err := IsUIDRunning(uid)
+									if err != nil {
+										log.Printf("[auto-stop] failed to check uid %d: %v", uid, err)
+										continue
+									}
+									if !running {
+										log.Printf("[auto-stop] target uid %d exited, stopping...", uid)
+										cancel()
+										return
+									}
+								}
+							}
+						}()
+					}
 
 					sigChan := make(chan os.Signal, 1)
 					signal.Notify(sigChan, os.Interrupt, unix.SIGTERM, unix.SIGHUP, unix.SIGQUIT)
