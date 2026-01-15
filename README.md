@@ -1,21 +1,23 @@
-# eBPFDexDumper
+# dexdump
 
 [![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://android.com/)
 
 [中文](README.md) | [English](README_en.md)
 
-基于 eBPF 技术的 Android 内存 DEX 转储工具。
+Android 内存 DEX 转储工具。
+
+**提示**: 本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群
 
 ## 特性
-- **不可检测**: 使用 eBPF 探针进行隐蔽操作
+- **不可检测**: 使用探针进行隐蔽操作
 - **被动转储**: 非侵入式内存分析
 - **实时追踪**: 可选的方法执行监控
 - **自动修复**: 内置 DEX 文件修复功能
 - **高性能**: 使用无锁缓存和优化的字符串处理
 - **简化操作**: 智能默认配置，一条命令完成转储和修复
 
-**展示**: https://blog.lleavesg.top/article/eBPFDexDumper
+**展示**: https://blog.lleavesg.top/article/dexdump
 
 ## 支持环境
 - **测试环境**: Android 13 (Pixel 6)
@@ -35,11 +37,11 @@
 
 ### 命令语法
 ```
-eBPFDexDumper [命令] [选项]
+dexdump [命令] [选项]
 ```
 
 **可用命令:**
-- `dump` - 启动基于 eBPF 的 DEX 转储器
+- `dump` - 启动 DEX 转储器
 - `fix` - 修复目录中的转储 DEX 文件
 
 ### `dump` 命令
@@ -61,25 +63,25 @@ eBPFDexDumper [命令] [选项]
 **示例:**
 ```bash
 # 最简用法 - 只需指定包名，自动完成转储+清理OAT+修复DEX
-./eBPFDexDumper dump -n com.example.app
+./dexdump dump -n com.example.app
 
 # 按 UID 过滤
-./eBPFDexDumper dump -u 10244
+./dexdump dump -u 10244
 
 # 启用实时方法追踪输出
-./eBPFDexDumper dump -n com.example.app -t
+./dexdump dump -n com.example.app -t
 
 # 自定义输出目录
-./eBPFDexDumper dump -n com.example.app -o /sdcard/dex_out
+./dexdump dump -n com.example.app -o /sdcard/dex_out
 
 # 禁用自动修复（只转储不修复）
-./eBPFDexDumper dump -n com.example.app --no-auto-fix
+./dexdump dump -n com.example.app --no-auto-fix
 
 # 禁用自动清理 OAT
-./eBPFDexDumper dump -n com.example.app --no-clean-oat
+./dexdump dump -n com.example.app --no-clean-oat
 
 # 为特定 ART 版本使用手动偏移量
-./eBPFDexDumper dump -n com.example.app --execute-offset 0x12345 --nterp-offset 0x67890
+./dexdump dump -n com.example.app --execute-offset 0x12345 --nterp-offset 0x67890
 ```
 
 **输出文件:**
@@ -96,7 +98,7 @@ eBPFDexDumper [命令] [选项]
 
 **示例:**
 ```bash
-./eBPFDexDumper fix -d /data/local/tmp/out
+./dexdump fix -d /data/local/tmp/out
 ```
 ![alt text](img/image-fix.png)
 
@@ -111,8 +113,8 @@ eBPFDexDumper [命令] [选项]
 ### 构建说明
 1. **克隆仓库:**
    ```bash
-   git clone https://github.com/LLeavesG/eBPFDexDumper.git
-   cd eBPFDexDumper
+   git clone https://github.com/LLeavesG/dexdump.git
+   cd dexdump
    ```
 
 2. **如有必要调整 NDK 路径**，然后构建:
@@ -126,8 +128,8 @@ eBPFDexDumper [命令] [选项]
 
 3. **推送到 Android 设备:**
    ```bash
-   adb push eBPFDexDumper /data/local/tmp/
-   adb shell chmod +x /data/local/tmp/eBPFDexDumper
+   adb push dexdump /data/local/tmp/
+   adb shell chmod +x /data/local/tmp/dexdump
    ```
 
 ## 故障排除
@@ -150,10 +152,10 @@ F0 0B 40 D1 1F 02 40 B9 FF 83 02 D1 E8 27 00 6D EA 2F 01 6D EC 37 02 6D EE 3F 03
 **2. 找不到二进制文件**
 ```bash
 # 验证文件是否正确推送
-adb shell ls -la /data/local/tmp/eBPFDexDumper
+adb shell ls -la /data/local/tmp/dexdump
 
 # 确保执行权限
-adb shell chmod +x /data/local/tmp/eBPFDexDumper
+adb shell chmod +x /data/local/tmp/dexdump
 ```
 
 **3. 空或不完整的 DEX 文件**
@@ -168,19 +170,17 @@ adb shell find /apex -name "libart.so" 2>/dev/null
 adb shell find /system -name "libart.so" 2>/dev/null
 ```
 
+**5. `Permission denied` 访问 `/data/adb` 或其他系统目录**
+- 需要 Root 权限进入这些目录；请先执行 `su` 获取 Root 后再运行命令
+- 如果是在 `adb shell` 中执行，确保目标设备已正确 Root 并允许超级用户访问
+
 ## 参考资料
-- [cilium/ebpf](https://github.com/cilium/ebpf) - Go 的 eBPF 库
-- [ebpfmanager](https://github.com/gojue/ebpfmanager) - Go + eBPF管理库
-- [stackplz](https://github.com/SeeFlowerX/stackplz) - StackPlz eBPF Tools
-- [eDBG](https://github.com/ShinoLeah/eDBG) - eDBG eBPF Debugger
 - [null-luo/btrace](https://github.com/null-luo/btrace) - 二进制追踪工具
 - [ART 内部结构](https://evilpan.com/2021/12/26/art-internal/)
 - [Android 运行时分析](https://zhuanlan.zhihu.com/p/523692715)
 - [DEX 文件格式](https://blog.csdn.net/weixin_47668107/article/details/114251185)
 - [Android 安全研究](https://juejin.cn/post/7045575502991458340)
-- [Android 上的 eBPF](https://juejin.cn/post/7384992816906747913)
 - [高级混淆技术](https://blog.quarkslab.com/dji-the-art-of-obfuscation.html)
-- [eBPF 文档](https://blog.seeflower.dev/archives/84/#title-7)
 
 
 ## 贡献

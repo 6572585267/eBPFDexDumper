@@ -21,7 +21,7 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	app := &cli.App{
-		Name:  "eBPFDexDumper",
+		Name:  "dexdump",
 		Usage: "Dump in-memory DEX and method bytecode or fix dumped DEX files",
 		// 自定义帮助模板：精简顶层信息并展示子命令详情
 		CustomAppHelpTemplate: `NAME:
@@ -48,8 +48,8 @@ SUBCOMMANDS:
 		Commands: []*cli.Command{
 			{
 				Name:        "dump",
-				Usage:       "Start eBPF-based DEX dumper",
-				Description: "Attach uprobes to libart and stream DEX/method events; provide either --uid or --name to filter.",
+				Usage:       "Start DEX dumper",
+				Description: "Attach probes to libart and stream DEX/method events; provide either --uid or --name to filter.",
 				CustomHelpTemplate: `NAME:
    {{.HelpName}} - {{.Usage}}
 
