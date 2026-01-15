@@ -146,7 +146,7 @@ OPTIONS:
 					if err := dumper.Stop(); err != nil {
 						log.Printf("Failed to stop dumper cleanly: %v", err)
 					}
-					log.Println("DexDumper stopped")
+					log.Println("dexdump finished")
 					return nil
 				},
 			},
