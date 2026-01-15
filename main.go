@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	cli "github.com/urfave/cli/v2"
@@ -77,6 +78,8 @@ OPTIONS:
 					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
 					&cli.BoolFlag{Name: "auto-stop", Usage: "Stop automatically when target process exits", Value: true},
 					&cli.BoolFlag{Name: "no-auto-stop", Usage: "Disable automatic stop on target exit"},
+					&cli.StringSliceFlag{Name: "filter-prefix", Usage: "Filter method classes by prefix (repeatable)"},
+					&cli.BoolFlag{Name: "no-filter-sdk", Usage: "Disable default SDK/system prefix filtering"},
 				},
 				Action: func(c *cli.Context) error {
 					fmt.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
@@ -91,6 +94,7 @@ OPTIONS:
 					executeOffset := c.Uint64("execute-offset")
 					nterpOffset := c.Uint64("nterp-offset")
 					autoStop := c.Bool("auto-stop") && !c.Bool("no-auto-stop")
+					filterPrefixes := buildFilterPrefixes(c)
 
 					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -120,7 +124,7 @@ OPTIONS:
 					}
 
 					// 创建并启动DexDumper
-					dumper := NewDexDumper(libArtPath, uid, outputDir, trace, autoFix, executeOffset, nterpOffset)
+					dumper := NewDexDumper(libArtPath, uid, outputDir, trace, autoFix, executeOffset, nterpOffset, filterPrefixes)
 
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
@@ -216,4 +220,41 @@ OPTIONS:
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func buildFilterPrefixes(c *cli.Context) []string {
+	defaultPrefixes := []string{
+		"android.",
+		"com.google.",
+		"com.android.",
+		"org.apache.",
+		"com.facebook.",
+		"com.tencent.",
+		"com.microsoft.",
+	}
+	var prefixes []string
+	if !c.Bool("no-filter-sdk") {
+		prefixes = append(prefixes, defaultPrefixes...)
+	}
+	for _, prefix := range c.StringSlice("filter-prefix") {
+		normalized := normalizePrefix(prefix)
+		if normalized != "" {
+			prefixes = append(prefixes, normalized)
+		}
+	}
+	return prefixes
+}
+
+func normalizePrefix(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	prefix = strings.TrimPrefix(prefix, "L")
+	prefix = strings.TrimSuffix(prefix, ";")
+	prefix = strings.ReplaceAll(prefix, "/", ".")
+	if prefix == "" {
+		return ""
+	}
+	if !strings.HasSuffix(prefix, ".") {
+		prefix += "."
+	}
+	return prefix
 }

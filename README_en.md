@@ -57,8 +57,12 @@ Attach probes to libart and stream DEX/method events. You must provide either `-
 - `--no-auto-fix` - Disable automatic DEX fixing
 - `--auto-stop` - Stop automatically when target process exits (default: **true**)
 - `--no-auto-stop` - Disable automatic stop on target exit
+- `--filter-prefix` - Filter method classes by prefix (repeatable)
+- `--no-filter-sdk` - Disable default SDK/system prefix filtering
 - `--execute-offset <value>` - Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)
 - `--nterp-offset <value>` - Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)
+
+Default filtered prefixes: `android.`, `com.google.`, `com.android.`, `org.apache.`, `com.facebook.`, `com.tencent.`, `com.microsoft.`
 
 **Examples:**
 ```bash
