@@ -22,6 +22,7 @@ func ByteToString(bs []int8) string {
 	for _, b := range bs {
 		ba = append(ba, byte(b))
 	}
+	// Trim空白与尾部\0，避免混入噪声字符
 	return string(bytes.TrimSpace(bytes.Trim(ba, "\x00")))
 }
 
@@ -29,12 +30,14 @@ func ByteToString(bs []int8) string {
 func CheckConfig(targetStr string) bool {
 	file, err := os.Open("/proc/config.gz")
 	if err != nil {
+		// 无权限或不存在时视为不支持
 		return false
 	}
 	defer file.Close()
 
 	gzReader, err := gzip.NewReader(file)
 	if err != nil {
+		// 解压失败则无法读取配置
 		return false
 	}
 	defer gzReader.Close()
@@ -60,6 +63,7 @@ func FindBTFAssets() string {
 	}
 	btfFile := "a12-5.10-arm64_min.btf"
 	if strings.Contains(ByteToString(utsname.Release[:]), "rockchip") {
+		// RK平台使用特定BTF
 		btfFile = "rock5b-5.10-arm64_min.btf"
 	}
 	fmt.Printf("Load btf_file=%s\n", btfFile)
@@ -239,6 +243,7 @@ func RemoveOatDirsForPackage(pkg string) {
 		}
 		seen[oatDir] = struct{}{}
 		if st, statErr := os.Stat(oatDir); statErr == nil && st.IsDir() {
+			// 删除oat目录以避免cdex/空结果
 			if err := os.RemoveAll(oatDir); err != nil {
 				log.Printf("[oat-clean] failed to remove %s: %v", oatDir, err)
 			} else {

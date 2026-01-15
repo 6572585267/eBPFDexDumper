@@ -111,11 +111,13 @@ func FixOneDex(dexPath, jsonPath, outPath string) error {
 		codeOff, ok := method2off[r.MethodIdx]
 		// log.Printf("Patching name %s method_idx %d, code_off 0x%X\n", r.Name, r.MethodIdx, codeOff)
 		if !ok || codeOff == 0 {
+			// 无code_off的记录直接跳过
 			skipped++
 			continue
 		}
 		// Get code header insns_size
 		if int(codeOff)+0x10 > len(dexBytes) {
+			// code_item头部不足，跳过
 			skipped++
 			continue
 		}
@@ -124,6 +126,7 @@ func FixOneDex(dexPath, jsonPath, outPath string) error {
 
 		codeBytes, err := hex.DecodeString(r.CodeHex)
 		if err != nil {
+			// codeHex异常则跳过该条
 			skipped++
 			continue
 		}
@@ -133,10 +136,12 @@ func FixOneDex(dexPath, jsonPath, outPath string) error {
 			writeLen = len(codeBytes)
 		}
 		if int(codeOff)+0x10+writeLen > len(dexBytes) {
+			// 写入范围越界直接跳过
 			skipped++
 			continue
 		}
 		if writeLen != len(codeBytes) || writeLen != expLen {
+			// 记录长度不一致，统计为mismatch
 			mismatched++
 		}
 		copy(dexBytes[int(codeOff)+0x10:int(codeOff)+0x10+writeLen], codeBytes[:writeLen])

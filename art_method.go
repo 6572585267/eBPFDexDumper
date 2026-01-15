@@ -50,6 +50,7 @@ func (cache *DexFileCache) AddDexFile(begin uint64, data []byte) error {
 		return fmt.Errorf("failed to create dex parser: %v", err)
 	}
 
+	// begin地址作为唯一键，便于与事件中的Begin对应
 	cache.parsers[begin] = parser
 	log.Printf("Added dex file to cache: begin=0x%x, size=%d", begin, len(data))
 	return nil
@@ -59,6 +60,7 @@ func (cache *DexFileCache) AddDexFile(begin uint64, data []byte) error {
 func (cache *DexFileCache) AddDexParser(begin uint64, parser *DexParser) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
+	// 只做缓存写入，不进行额外校验
 	cache.parsers[begin] = parser
 }
 
@@ -67,6 +69,7 @@ func (cache *DexFileCache) GetParser(begin uint64) *DexParser {
 	cache.mu.RLock()
 	defer cache.mu.RUnlock()
 
+	// 读锁保障并发访问安全
 	return cache.parsers[begin]
 }
 

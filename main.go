@@ -86,6 +86,7 @@ OPTIONS:
 					executeOffset := c.Uint64("execute-offset")
 					nterpOffset := c.Uint64("nterp-offset")
 
+					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
 						return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 					}
@@ -112,6 +113,7 @@ OPTIONS:
 						}
 					}
 
+					// 创建并启动DexDumper
 					dumper := NewDexDumper(libArtPath, uid, outputDir, trace, autoFix, executeOffset, nterpOffset)
 
 					ctx, cancel := context.WithCancel(context.Background())
@@ -125,6 +127,7 @@ OPTIONS:
 						for {
 							select {
 							case sig := <-sigChan:
+								// 收到信号后主动触发Stop流程
 								log.Printf("Received signal %v, flushing JSON and shutting down...", sig)
 								cancel()
 								return
@@ -134,6 +137,7 @@ OPTIONS:
 						}
 					}()
 
+					// 启动并阻塞等待退出
 					if err := dumper.Start(ctx); err != nil {
 						return fmt.Errorf("failed to start dumper: %w", err)
 					}

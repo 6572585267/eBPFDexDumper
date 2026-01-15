@@ -280,6 +280,7 @@ func (p *DexParser) getProtoInfo(protoIdx uint32) (*ProtoInfo, error) {
 
 	var parameters []string
 	if parametersOff != 0 {
+		// 参数列表存在时才解析，避免无意义读取
 		parameters, err = p.getParameterTypes(parametersOff)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get parameter types: %v", err)
@@ -318,6 +319,7 @@ func (p *DexParser) getParameterTypes(offset uint32) ([]string, error) {
 			return nil, fmt.Errorf("failed to get parameter type: %v", err)
 		}
 
+		// 按参数顺序追加类型描述
 		parameters = append(parameters, typeDesc)
 	}
 
@@ -356,6 +358,7 @@ func (info *MethodInfo) PrettyMethod() string {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
+		// 将DEX类型描述转成可读类型
 		formatTypeToBuilder(&sb, param)
 	}
 

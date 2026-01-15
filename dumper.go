@@ -119,6 +119,7 @@ func SetupManagerOptions() (manager.Options, error) {
 	}
 
 	if btfFile != "" {
+		// 使用内置BTF，避免系统未开启CONFIG_DEBUG_INFO_BTF时加载失败
 		var byteBuf []byte
 		var err error
 
@@ -147,6 +148,7 @@ func SetupManagerOptions() (manager.Options, error) {
 			}, nil
 		}
 		log.Printf("[+] Loaded BTF spec from %s", btfFile)
+		// 配置Verifier参数，提升BPF加载兼容性与日志可读性
 		bpfManagerOptions = manager.Options{
 			DefaultKProbeMaxActive: 512,
 			VerifierOptions: ebpf.CollectionOptions{
@@ -161,6 +163,7 @@ func SetupManagerOptions() (manager.Options, error) {
 			},
 		}
 	} else {
+		// 无BTF时仍启用日志与资源限制，避免BPF加载失败
 		bpfManagerOptions = manager.Options{
 			DefaultKProbeMaxActive: 512,
 			VerifierOptions: ebpf.CollectionOptions{
@@ -310,6 +313,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 		Pid: 0,
 	}
 
+	// 将过滤配置写入BPF map（0号key）
 	if err := configMap.Put(uint32(0), config); err != nil {
 		return fmt.Errorf("failed to put config: %v", err)
 	}
@@ -439,6 +443,7 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 	// Read bytecode if present
 	var bytecode []byte
 	if methodHeader.CodeitemSize > 0 {
+		// 根据codeitem_size读取字节码，避免读入无效数据
 		bytecode = make([]byte, methodHeader.CodeitemSize)
 		if err := binary.Read(buf, binary.LittleEndian, &bytecode); err != nil {
 			return
@@ -471,6 +476,7 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 
 	if methodHeader.CodeitemSize > 0 {
 		if dd.trace {
+			// trace模式下输出方法执行信息，便于实时定位
 			log.Printf("%s (pid=%d, dex=0x%x, method_idx=%d, art_method=0x%x, bytecode_size=%d)",
 				methodName,
 				methodHeader.Pid,
@@ -487,6 +493,7 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 				MethodIdx: methodHeader.MethodIndex,
 				CodeHex:   hex.EncodeToString(bytecode),
 			}
+			// 以dex begin为分组，便于后续单独输出
 			dd.methodRecordsMu.Lock()
 			dd.methodRecords[methodHeader.Begin] = append(dd.methodRecords[methodHeader.Begin], rec)
 			dd.methodRecordsMu.Unlock()
@@ -529,6 +536,7 @@ func (dd *DexDumper) flushJSON() {
 			}
 		}
 
+		// 根据begin/size生成稳定文件名，避免覆盖
 		fileName := fmt.Sprintf("%s/dex_%x_%x_code.json", outputPath, begin, size)
 		f, err := os.Create(fileName)
 		if err != nil {
@@ -567,6 +575,7 @@ func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
 		return
 	}
 
+	// 解析头部校验魔数与结构完整性
 	parser, err := NewDexParser(data)
 	if err != nil {
 		log.Printf("Invalid dex data (begin=0x%x): %v", begin, err)
@@ -582,8 +591,10 @@ func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
 		return
 	}
 
+	// 写入缓存，供后续方法签名解析使用
 	dexCache.AddDexParser(begin, parser)
 
+	// 仅写入header声明的有效区间
 	fileName := fmt.Sprintf("%s/dex_%x_%x.dex", outputPath, begin, parser.header.FileSize)
 	f, err := os.Create(fileName)
 	if err != nil {
@@ -628,6 +639,7 @@ func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *m
 	st, ok := dd.pendingDex[begin]
 	if !ok {
 		// init new state
+		// 预分配完整Dex大小，保证分片写入定位一致
 		st = &dexRecvState{total: hdr.Size, buf: make([]byte, hdr.Size)}
 		dd.pendingDex[begin] = st
 		// record size for later JSON name
@@ -637,6 +649,7 @@ func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *m
 	}
 	// bounds check
 	if uint64(hdr.Offset)+uint64(hdr.DataLen) <= uint64(len(st.buf)) {
+		// 将分片数据拷贝到目标位置
 		copy(st.buf[hdr.Offset:uint32(hdr.Offset)+hdr.DataLen], payload)
 		// update received length conservatively; allow duplicates
 		if st.recv < hdr.Offset+hdr.DataLen {
@@ -651,6 +664,7 @@ func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *m
 		delete(dd.pendingDex, begin)
 		dd.pendingDexMu.Unlock()
 
+		// 完整DEX重组后统一校验与输出
 		dd.saveDexFile(begin, hdr.Size, dataCopy)
 		return
 	}
@@ -690,10 +704,12 @@ func (dd *DexDumper) readRemoteDexFallback(begin uint64, pid uint32, totalSize u
 
 	readSize := uint32(ret)
 	if readSize != totalSize {
+		// 读取不足时裁剪，避免越界
 		log.Printf("readRemoteMem partial read: expected %d, got %d", totalSize, readSize)
 		buf = buf[:readSize]
 	}
 
+	// 兜底路径下也清理pending状态，避免重复拼接
 	dd.pendingDexMu.Lock()
 	delete(dd.pendingDex, begin)
 	dd.pendingDexMu.Unlock()
@@ -702,5 +718,6 @@ func (dd *DexDumper) readRemoteDexFallback(begin uint64, pid uint32, totalSize u
 	dd.dexSizes[begin] = totalSize
 	dd.dexSizesMu.Unlock()
 
+	// 复用统一的校验与保存逻辑
 	dd.saveDexFile(begin, totalSize, buf)
 }
