@@ -58,6 +58,12 @@ type methodTask struct {
 	data []byte
 }
 
+// dexRecordBuffer 按DEX分组记录方法字节码，降低全局锁竞争
+type dexRecordBuffer struct {
+	mu      sync.Mutex
+	records []MethodCodeRecord
+}
+
 type DexDumper struct {
 	manager       *manager.Manager
 	libArtPath    string
@@ -74,9 +80,8 @@ type DexDumper struct {
 	dexSizesMu sync.RWMutex
 	dexSizes   map[uint64]uint32 // Begin -> Size
 
-	// 方法记录使用sync.Map + 原子操作
-	methodRecordsMu sync.Mutex
-	methodRecords   map[uint64][]MethodCodeRecord // Begin -> records
+	// 按DEX分组的记录缓存，避免全局锁竞争
+	recordBuffers sync.Map // key: begin(uint64), value: *dexRecordBuffer
 
 	// 分片接收状态：在Go侧重组eBPF分片
 	pendingDexMu sync.Mutex
@@ -84,6 +89,7 @@ type DexDumper struct {
 
 	// Worker pool for parallel method event processing
 	methodTaskChan chan methodTask
+	methodBufPool  sync.Pool
 	workerWg       sync.WaitGroup
 	stopped        atomic.Bool
 }
@@ -116,6 +122,26 @@ func Asset(filename string) ([]byte, error) {
 // methodSigCacheKey 统一生成方法签名缓存key，避免位移魔法数散落
 func methodSigCacheKey(begin uint64, methodIdx uint32) uint64 {
 	return (begin << 32) | uint64(methodIdx)
+}
+
+// getMethodBuf 从池中获取可复用缓冲区，减少分配
+func (dd *DexDumper) getMethodBuf(size int) []byte {
+	if v := dd.methodBufPool.Get(); v != nil {
+		buf := v.([]byte)
+		if cap(buf) >= size {
+			return buf[:size]
+		}
+	}
+	return make([]byte, size)
+}
+
+// putMethodBuf 回收缓冲区，限制过大切片避免内存占用膨胀
+func (dd *DexDumper) putMethodBuf(buf []byte) {
+	const maxMethodBufCap = 1 << 20 // 1MB
+	if cap(buf) > maxMethodBufCap {
+		return
+	}
+	dd.methodBufPool.Put(buf[:0])
 }
 
 func SetupManagerOptions() (manager.Options, error) {
@@ -385,7 +411,6 @@ func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFi
 		executeOffset:  executeOffset,
 		nterpOffset:    nterpOffset,
 		dexSizes:       make(map[uint64]uint32),
-		methodRecords:  make(map[uint64][]MethodCodeRecord),
 		pendingDex:     make(map[uint64]*dexRecvState),
 		methodTaskChan: make(chan methodTask, 4096), // 缓冲通道
 	}
@@ -404,6 +429,7 @@ func (dd *DexDumper) methodWorker() {
 	defer dd.workerWg.Done()
 	for task := range dd.methodTaskChan {
 		dd.processMethodEvent(task.data)
+		dd.putMethodBuf(task.data)
 	}
 }
 
@@ -429,13 +455,14 @@ func (dd *DexDumper) handleMethodEventRingBuf(CPU int, data []byte, perfMap *man
 		return
 	}
 	// 复制数据并分发到 worker pool
-	dataCopy := make([]byte, len(data))
+	dataCopy := dd.getMethodBuf(len(data))
 	copy(dataCopy, data)
 	select {
 	case dd.methodTaskChan <- methodTask{data: dataCopy}:
 	default:
 		// 通道满时直接处理，避免阻塞 ringbuf
 		dd.processMethodEvent(dataCopy)
+		dd.putMethodBuf(dataCopy)
 	}
 }
 
@@ -505,9 +532,11 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 				CodeHex:   hex.EncodeToString(bytecode),
 			}
 			// 以dex begin为分组，便于后续单独输出
-			dd.methodRecordsMu.Lock()
-			dd.methodRecords[methodHeader.Begin] = append(dd.methodRecords[methodHeader.Begin], rec)
-			dd.methodRecordsMu.Unlock()
+			bufAny, _ := dd.recordBuffers.LoadOrStore(methodHeader.Begin, &dexRecordBuffer{})
+			buf := bufAny.(*dexRecordBuffer)
+			buf.mu.Lock()
+			buf.records = append(buf.records, rec)
+			buf.mu.Unlock()
 		}
 	} else {
 		if dd.trace {
@@ -522,11 +551,6 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 }
 
 func (dd *DexDumper) flushJSON() {
-	dd.methodRecordsMu.Lock()
-	records := dd.methodRecords
-	dd.methodRecords = make(map[uint64][]MethodCodeRecord)
-	dd.methodRecordsMu.Unlock()
-
 	dd.dexSizesMu.RLock()
 	sizes := make(map[uint64]uint32, len(dd.dexSizes))
 	for k, v := range dd.dexSizes {
@@ -535,9 +559,17 @@ func (dd *DexDumper) flushJSON() {
 	dd.dexSizesMu.RUnlock()
 
 	// 按DEX文件分别输出JSON
-	for begin, recs := range records {
+	dd.recordBuffers.Range(func(key, value any) bool {
+		begin := key.(uint64)
+		buf := value.(*dexRecordBuffer)
+		buf.mu.Lock()
+		recs := buf.records
+		if len(recs) > 0 {
+			buf.records = nil
+		}
+		buf.mu.Unlock()
 		if len(recs) == 0 {
-			continue
+			return true
 		}
 
 		size := sizes[begin]
@@ -552,13 +584,12 @@ func (dd *DexDumper) flushJSON() {
 		f, err := os.Create(fileName)
 		if err != nil {
 			log.Printf("Create JSON file failed: %v", err)
-			continue
+			return true
 		}
 
-		// 使用bufio提升写入性能
+		// 使用bufio提升写入性能，JSON不缩进以减少体积与I/O
 		writer := bufio.NewWriter(f)
 		enc := json.NewEncoder(writer)
-		enc.SetIndent("", "  ")
 		if err := enc.Encode(recs); err != nil {
 			log.Printf("Write JSON failed: %v", err)
 		} else {
@@ -566,7 +597,8 @@ func (dd *DexDumper) flushJSON() {
 			log.Printf("Saved code records to %s (%d entries)", fileName, len(recs))
 		}
 		f.Close()
-	}
+		return true
+	})
 }
 
 // 接收状态结构：重组 eBPF 分片
@@ -593,6 +625,14 @@ func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
 		return
 	}
 
+	if parser.header.FileSize == 0 || parser.header.FileSize > maxDexSize {
+		log.Printf("Dex header size invalid (begin=0x%x): %d", begin, parser.header.FileSize)
+		return
+	}
+	if parser.header.HeaderSize != 0x70 {
+		log.Printf("Dex header size mismatch (begin=0x%x): %d", begin, parser.header.HeaderSize)
+		return
+	}
 	if size != 0 && parser.header.FileSize > size {
 		log.Printf("Dex size mismatch (begin=0x%x): header=%d expect<=%d", begin, parser.header.FileSize, size)
 		return
@@ -607,6 +647,10 @@ func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
 
 	// 仅写入header声明的有效区间
 	fileName := fmt.Sprintf("%s/dex_%x_%x.dex", outputPath, begin, parser.header.FileSize)
+	if _, err := os.Stat(fileName); err == nil {
+		// 文件已存在则跳过写入，减少I/O
+		return
+	}
 	f, err := os.Create(fileName)
 	if err != nil {
 		log.Printf("Create file failed: %v", err)
