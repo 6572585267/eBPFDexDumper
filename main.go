@@ -20,8 +20,6 @@ func main() {
 	log.SetFlags(0)
 	log.SetOutput(os.Stdout)
 
-	log.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
-
 	app := &cli.App{
 		Name:  "dexdump",
 		Usage: "Dump in-memory DEX and method bytecode or fix dumped DEX files",
@@ -78,6 +76,8 @@ OPTIONS:
 					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
 				},
 				Action: func(c *cli.Context) error {
+					fmt.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
+
 					uid := uint32(c.Uint64("uid"))
 					pkgName := c.String("name")
 					libArtPath := c.String("libart")
