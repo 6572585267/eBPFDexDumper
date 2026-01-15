@@ -434,6 +434,10 @@ func (dd *DexDumper) methodWorker() {
 // handleDexEventRingBuf 处理 Dex 文件事件 (RingBuffer版本)
 func (dd *DexDumper) handleDexEventRingBuf(CPU int, data []byte, ringBuf *manager.RingbufMap, mgr *manager.Manager) {
 	dexHeader := dexDumpHeader{}
+	if len(data) < int(unsafe.Sizeof(dexDumpHeader{})) {
+		log.Printf("Dex event too short: %d bytes", len(data))
+		return
+	}
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &dexHeader); err != nil {
 		log.Printf("Read dex event failed: %v", err)
 		return
@@ -479,6 +483,9 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 	var bytecode []byte
 	if methodHeader.CodeitemSize > 0 {
 		// 根据codeitem_size读取字节码，避免读入无效数据
+		if methodHeader.CodeitemSize > maxMethodBytecodeSize {
+			return
+		}
 		end := headerSize + int(methodHeader.CodeitemSize)
 		if end > len(data) {
 			return
@@ -607,7 +614,8 @@ type dexRecvState struct {
 }
 
 // 限制单个DEX的最大大小，避免异常数据导致内存暴涨
-const maxDexSize = 512 * 1024 * 1024 // 512MB
+const maxDexSize = 512 * 1024 * 1024     // 512MB
+const maxMethodBytecodeSize = 512 * 1024 // 512KB
 
 // saveDexFile 校验DEX有效性后写入文件并缓存解析结果
 func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
@@ -663,7 +671,8 @@ func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
 }
 
 func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *manager.RingbufMap, mgr *manager.Manager) {
-	if len(data) < int(unsafe.Sizeof(bpfDexChunkEventT{})) {
+	headerSize := int(unsafe.Sizeof(bpfDexChunkEventT{}))
+	if len(data) < headerSize {
 		log.Printf("Dex chunk event too short: %d bytes", len(data))
 		return
 	}
@@ -677,9 +686,16 @@ func (dd *DexDumper) handleDexChunkEventRingBuf(CPU int, data []byte, ringBuf *m
 		log.Printf("Dex chunk size invalid: begin=0x%x size=%d", hdr.Begin, hdr.Size)
 		return
 	}
+	if hdr.DataLen == 0 || hdr.DataLen > hdr.Size {
+		log.Printf("Dex chunk data length invalid: begin=0x%x len=%d size=%d", hdr.Begin, hdr.DataLen, hdr.Size)
+		return
+	}
+	if hdr.Offset >= hdr.Size || hdr.Offset+hdr.DataLen > hdr.Size {
+		log.Printf("Dex chunk offset invalid: begin=0x%x off=%d len=%d size=%d", hdr.Begin, hdr.Offset, hdr.DataLen, hdr.Size)
+		return
+	}
 
 	// 直接切片引用ringbuf数据，避免额外分配
-	headerSize := int(unsafe.Sizeof(bpfDexChunkEventT{}))
 	payloadEnd := headerSize + int(hdr.DataLen)
 	if payloadEnd > len(data) {
 		log.Printf("Dex chunk payload out of bounds: %d > %d", payloadEnd, len(data))
