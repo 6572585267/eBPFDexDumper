@@ -484,6 +484,7 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 	if methodHeader.CodeitemSize > 0 {
 		// 根据codeitem_size读取字节码，避免读入无效数据
 		if methodHeader.CodeitemSize > maxMethodBytecodeSize {
+			log.Printf("Method bytecode too large (begin=0x%x idx=%d size=%d)", methodHeader.Begin, methodHeader.MethodIndex, methodHeader.CodeitemSize)
 			return
 		}
 		end := headerSize + int(methodHeader.CodeitemSize)
@@ -574,6 +575,7 @@ func (dd *DexDumper) flushJSON() {
 		}
 		buf.mu.Unlock()
 		if len(recs) == 0 {
+			dd.recordBuffers.Delete(begin)
 			return true
 		}
 
@@ -602,6 +604,7 @@ func (dd *DexDumper) flushJSON() {
 			log.Printf("Saved code records to %s (%d entries)", fileName, len(recs))
 		}
 		f.Close()
+		dd.recordBuffers.Delete(begin)
 		return true
 	})
 }
@@ -657,14 +660,30 @@ func (dd *DexDumper) saveDexFile(begin uint64, size uint32, data []byte) {
 		// 文件已存在则跳过写入，减少I/O
 		return
 	}
-	f, err := os.Create(fileName)
+	tmpFile, err := os.CreateTemp(outputPath, fmt.Sprintf(".dex_%x_*.tmp", begin))
 	if err != nil {
 		log.Printf("Create file failed: %v", err)
 		return
 	}
-	defer f.Close()
-	if _, err := f.Write(data[:parser.header.FileSize]); err != nil {
+	tmpName := tmpFile.Name()
+	defer func() {
+		tmpFile.Close()
+		os.Remove(tmpName)
+	}()
+	if _, err := tmpFile.Write(data[:parser.header.FileSize]); err != nil {
 		log.Printf("Write dexData failed: %v", err)
+		return
+	}
+	if err := tmpFile.Sync(); err != nil {
+		log.Printf("Sync dex temp file failed: %v", err)
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		log.Printf("Close dex temp file failed: %v", err)
+		return
+	}
+	if err := os.Rename(tmpName, fileName); err != nil {
+		log.Printf("Rename dex temp file failed: %v", err)
 		return
 	}
 	log.Printf("Dex file saved to %s, size %d", fileName, parser.header.FileSize)
