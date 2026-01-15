@@ -80,6 +80,8 @@ OPTIONS:
 					&cli.BoolFlag{Name: "no-auto-stop", Usage: "Disable automatic stop on target exit"},
 					&cli.StringSliceFlag{Name: "filter-prefix", Usage: "Filter method classes by prefix (repeatable)"},
 					&cli.BoolFlag{Name: "no-filter-sdk", Usage: "Disable default SDK/system prefix filtering"},
+					&cli.BoolFlag{Name: "trigger-start", Usage: "Trigger app launch after probes attach", Value: true},
+					&cli.BoolFlag{Name: "no-trigger-start", Usage: "Disable automatic launch trigger"},
 				},
 				Action: func(c *cli.Context) error {
 					fmt.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
@@ -95,6 +97,7 @@ OPTIONS:
 					nterpOffset := c.Uint64("nterp-offset")
 					autoStop := c.Bool("auto-stop") && !c.Bool("no-auto-stop")
 					filterPrefixes := buildFilterPrefixes(c)
+					triggerStart := c.Bool("trigger-start") && !c.Bool("no-trigger-start")
 
 					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -128,6 +131,17 @@ OPTIONS:
 
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
+
+					if triggerStart && pkgName != "" {
+						go func() {
+							<-dumper.Ready()
+							if err := TriggerAppLaunch(pkgName); err != nil {
+								log.Printf("[trigger] failed to launch %s: %v", pkgName, err)
+							}
+						}()
+					} else if triggerStart {
+						log.Printf("[trigger] skipped (no package name)")
+					}
 
 					if autoStop && uid != 0 {
 						go func() {

@@ -59,6 +59,8 @@ Attach probes to libart and stream DEX/method events. You must provide either `-
 - `--no-auto-stop` - Disable automatic stop on target exit
 - `--filter-prefix` - Filter method classes by prefix (repeatable)
 - `--no-filter-sdk` - Disable default SDK/system prefix filtering
+- `--trigger-start` - Launch the app after probes attach (default: **true**)
+- `--no-trigger-start` - Disable automatic launch trigger
 - `--execute-offset <value>` - Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)
 - `--nterp-offset <value>` - Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)
 

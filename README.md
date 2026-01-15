@@ -59,6 +59,8 @@ dexdump [命令] [选项]
 - `--no-auto-stop` - 禁用目标退出自动停止
 - `--filter-prefix` - 类名前缀过滤（可重复设置）
 - `--no-filter-sdk` - 禁用默认 SDK/系统类前缀过滤
+- `--trigger-start` - 探针附加后自动拉起应用（默认值：**true**）
+- `--no-trigger-start` - 禁用自动拉起触发
 - `--execute-offset <value>` - art::interpreter::Execute 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 - `--nterp-offset <value>` - ExecuteNterpImpl 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 

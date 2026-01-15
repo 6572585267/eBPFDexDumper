@@ -71,6 +71,7 @@ type DexDumper struct {
 	executeOffset uint64
 	nterpOffset   uint64
 	filterPrefixes []string
+	ready          chan struct{}
 
 	// 使用sync.Map减少锁竞争（key: methodSigKey）
 	methodSigCache sync.Map // key: methodSigKey, value: string
@@ -359,6 +360,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 	}
 
 	log.Printf("dexdump started successfully")
+	close(dd.ready)
 
 	// 等待停止信号
 	<-ctx.Done()
@@ -410,6 +412,7 @@ func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFi
 		executeOffset:  executeOffset,
 		nterpOffset:    nterpOffset,
 		filterPrefixes: filterPrefixes,
+		ready:          make(chan struct{}),
 		dexSizes:       make(map[uint64]uint32),
 		pendingDex:     make(map[uint64]*dexRecvState),
 		methodTaskChan: make(chan methodTask, 4096), // 缓冲通道
@@ -422,6 +425,10 @@ func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFi
 	}
 
 	return dd
+}
+
+func (dd *DexDumper) Ready() <-chan struct{} {
+	return dd.ready
 }
 
 // methodWorker 并行处理方法事件

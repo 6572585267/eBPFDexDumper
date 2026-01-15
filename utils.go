@@ -33,14 +33,14 @@ func CheckConfig(targetStr string) bool {
 		// 无权限或不存在时视为不支持
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzReader, err := gzip.NewReader(file)
 	if err != nil {
 		// 解压失败则无法读取配置
 		return false
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	scanner := bufio.NewScanner(gzReader)
 	target := []byte(targetStr)
@@ -77,7 +77,7 @@ func FindBTFAssets() string {
 func LookupUIDByPackageName(pkg string) (uint32, error) {
 	// 1) Try packages.list (requires root). Format: "<pkg> <uid> ..."
 	if f, err := os.Open("/data/system/packages.list"); err == nil {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -148,7 +148,7 @@ func LookupPackagesByUID(uid uint32) ([]string, error) {
 	var pkgs []string
 	// 1) packages.list
 	if f, err := os.Open("/data/system/packages.list"); err == nil {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -308,12 +308,40 @@ func IsUIDRunning(uid uint32) (bool, error) {
 	return false, nil
 }
 
+// TriggerAppLaunch resolves and launches the app's main activity to trigger class loading.
+func TriggerAppLaunch(pkg string) error {
+	component, err := ResolveLaunchActivity(pkg)
+	if err == nil && component != "" {
+		return exec.Command("/system/bin/sh", "-c", "am start -n "+component).Run()
+	}
+	return exec.Command("/system/bin/sh", "-c", "monkey -p "+pkg+" -c android.intent.category.LAUNCHER 1").Run()
+}
+
+// ResolveLaunchActivity tries to resolve the launchable activity component for a package.
+func ResolveLaunchActivity(pkg string) (string, error) {
+	out, err := exec.Command("/system/bin/sh", "-c", "cmd package resolve-activity --brief "+pkg).Output()
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "/") {
+			return line, nil
+		}
+	}
+	return "", fmt.Errorf("no launchable activity for %s", pkg)
+}
+
 func findPatternUAddrs(path string, pattern []byte) ([]uint64, error) {
 	f, err := elf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open elf failed: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	addrs := make([]uint64, 0)
 	seen := make(map[uint64]struct{})
@@ -358,7 +386,7 @@ func findStringInELF(path string, target string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open elf failed: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	targetBytes := []byte(target)
 	for _, p := range f.Progs {
@@ -389,7 +417,7 @@ func findExecuteByInterpretingString(path string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open elf failed: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Find "Interpreting " string address
 	strAddr, err := findStringInELF(path, "Interpreting ")
@@ -485,7 +513,7 @@ func findExecuteByInterpretingString(path string) (uint64, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("Execute function not found (no 6-parameter function found)")
+	return 0, fmt.Errorf("execute function not found (no 6-parameter function found)")
 }
 
 // findFunctionEntry searches backward from refAddr to find function entry
@@ -561,7 +589,7 @@ func parseLibArt(path string) map[string]uint64 {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	symMap := make(map[string]uint64)
 
