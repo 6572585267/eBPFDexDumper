@@ -357,7 +357,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start manager: %v", err)
 	}
 
-	log.Printf("eBPF DexDumper started successfully")
+	log.Printf("dexdump started successfully")
 
 	// 等待停止信号
 	<-ctx.Done()
@@ -367,7 +367,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 
 // Stop 停止 DexDumper
 func (dd *DexDumper) Stop() error {
-	log.Printf("Stopping eBPF DexDumper")
+	log.Printf("Stopping dexdump")
 
 	// 标记停止，阻止新事件进入
 	dd.stopped.Store(true)
