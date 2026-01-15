@@ -1,21 +1,21 @@
-# eBPFDexDumper
+# dexdump
 
 [![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://android.com/)
 
 [中文](README.md) | [English](README_en.md)
 
-Android in-memory DEX dumper powered by eBPF technology.
+Android in-memory DEX dumper.
 
 ## Features
-- **Undetectable**: Uses eBPF uprobes for stealth operation
+- **Undetectable**: Uses probes for stealth operation
 - **Passive dump**: Non-intrusive memory analysis
 - **Real-time tracing**: Optional method execution monitoring
 - **Automatic fixing**: Built-in DEX file repair functionality
 - **High performance**: Lock-free caching and optimized string processing
 - **Simplified operation**: Smart defaults, dump and fix in one command
 
-**Showcase**: https://blog.lleavesg.top/article/eBPFDexDumper
+**Showcase**: https://blog.lleavesg.top/article/dexdump
 
 ## Supported Environment
 - **Tested on**: Android 13 (Pixel 6)
@@ -29,21 +29,21 @@ The tool automatically removes the app's OAT optimization output to avoid `cdex`
 - Find base path: `pm path <package>`
 - Remove oat folder: delete the app's `oat/` directory under `/data/app/.../<package>/`
 
-Root permission is typically required to attach uprobes and read target memory.
+Root permission is typically required to attach probes and read target memory.
 
 ## Usage
 
 ### Command Syntax
 ```
-eBPFDexDumper [command] [options]
+dexdump [command] [options]
 ```
 
 **Available Commands:**
-- `dump` - Start eBPF-based DEX dumper
+- `dump` - Start DEX dumper
 - `fix` - Fix dumped DEX files in a directory
 
 ### `dump` Command
-Attach uprobes to libart and stream DEX/method events. You must provide either `--uid` or `--name` to filter the target app.
+Attach probes to libart and stream DEX/method events. You must provide either `--uid` or `--name` to filter the target app.
 
 **Options:**
 - `--uid, -u <uid>` - Filter by UID (alternative to `--name`) (default: 0)
@@ -61,25 +61,25 @@ Attach uprobes to libart and stream DEX/method events. You must provide either `
 **Examples:**
 ```bash
 # Simplest usage - just specify package name, auto dump+clean-oat+fix
-./eBPFDexDumper dump -n com.example.app
+./dexdump dump -n com.example.app
 
 # Filter by UID
-./eBPFDexDumper dump -u 10244
+./dexdump dump -u 10244
 
 # Enable realtime method trace output
-./eBPFDexDumper dump -n com.example.app -t
+./dexdump dump -n com.example.app -t
 
 # Custom output directory
-./eBPFDexDumper dump -n com.example.app -o /sdcard/dex_out
+./dexdump dump -n com.example.app -o /sdcard/dex_out
 
 # Disable auto-fix (dump only)
-./eBPFDexDumper dump -n com.example.app --no-auto-fix
+./dexdump dump -n com.example.app --no-auto-fix
 
 # Disable auto clean-oat
-./eBPFDexDumper dump -n com.example.app --no-clean-oat
+./dexdump dump -n com.example.app --no-clean-oat
 
 # Use manual offsets for specific ART versions
-./eBPFDexDumper dump -n com.example.app --execute-offset 0x12345 --nterp-offset 0x67890
+./dexdump dump -n com.example.app --execute-offset 0x12345 --nterp-offset 0x67890
 ```
 
 **Output Files:**
@@ -95,7 +95,7 @@ Scan a directory for dumped DEX files and fix headers/structures for readability
 
 **Example:**
 ```bash
-./eBPFDexDumper fix -d /data/local/tmp/out
+./dexdump fix -d /data/local/tmp/out
 ```
 
 ## Installation & Build
@@ -109,8 +109,8 @@ Scan a directory for dumped DEX files and fix headers/structures for readability
 ### Build Instructions
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/LLeavesG/eBPFDexDumper.git
-   cd eBPFDexDumper
+   git clone https://github.com/LLeavesG/dexdump.git
+   cd dexdump
    ```
 
 2. **Adjust NDK path if necessary**, then build:
@@ -120,8 +120,8 @@ Scan a directory for dumped DEX files and fix headers/structures for readability
 
 3. **Push to Android device:**
    ```bash
-   adb push eBPFDexDumper /data/local/tmp/
-   adb shell chmod +x /data/local/tmp/eBPFDexDumper
+   adb push dexdump /data/local/tmp/
+   adb shell chmod +x /data/local/tmp/dexdump
    ```
 
 ## Troubleshooting
@@ -146,10 +146,10 @@ Don't use -u to specify the app's pid.
 **2. Binary Not Found**
 ```bash
 # Verify file was pushed correctly
-adb shell ls -la /data/local/tmp/eBPFDexDumper
+adb shell ls -la /data/local/tmp/dexdump
 
 # Ensure execute permissions
-adb shell chmod +x /data/local/tmp/eBPFDexDumper
+adb shell chmod +x /data/local/tmp/dexdump
 ```
 
 **3. Empty or Incomplete DEX Files**
@@ -164,19 +164,17 @@ adb shell find /apex -name "libart.so" 2>/dev/null
 adb shell find /system -name "libart.so" 2>/dev/null
 ```
 
+**5. `Permission denied` when accessing `/data/adb` or other system paths**
+- These directories require Root; run `su` first before running commands
+- When using `adb shell`, make sure the device is rooted and superuser access is granted
+
 ## References
-- [cilium/ebpf](https://github.com/cilium/ebpf) - eBPF library for Go
-- [ebpfmanager](https://github.com/gojue/ebpfmanager) - Go + eBPF Manager Library
-- [stackplz](https://github.com/SeeFlowerX/stackplz) - StackPlz eBPF Tools
-- [eDBG](https://github.com/ShinoLeah/eDBG) - eDBG eBPF Debugger
 - [null-luo/btrace](https://github.com/null-luo/btrace) - Binary tracing tools
 - [ART Internal Structure](https://evilpan.com/2021/12/26/art-internal/)
 - [Android Runtime Analysis](https://zhuanlan.zhihu.com/p/523692715)
 - [DEX File Format](https://blog.csdn.net/weixin_47668107/article/details/114251185)
 - [Android Security Research](https://juejin.cn/post/7045575502991458340)
-- [eBPF on Android](https://juejin.cn/post/7384992816906747913)
 - [Advanced Obfuscation Techniques](https://blog.quarkslab.com/dji-the-art-of-obfuscation.html)
-- [eBPF Documentation](https://blog.seeflower.dev/archives/84/#title-7)
 
 ## Contributing
 

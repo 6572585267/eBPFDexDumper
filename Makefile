@@ -14,7 +14,7 @@ HEADERS = headers
 VMLINUX_HEADERS = vmlinux/$(TARGET)
 
 BPF_OUTPUT = bpf
-BINARY_NAME = eBPFDexDumper
+BINARY_NAME = dexdump
 
 ANDROID_NDK_ROOT = /home/lleaves/android-ndk-r25c
 

@@ -20,8 +20,10 @@ func main() {
 	log.SetFlags(0)
 	log.SetOutput(os.Stdout)
 
+	log.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
+
 	app := &cli.App{
-		Name:  "eBPFDexDumper",
+		Name:  "dexdump",
 		Usage: "Dump in-memory DEX and method bytecode or fix dumped DEX files",
 		// 自定义帮助模板：精简顶层信息并展示子命令详情
 		CustomAppHelpTemplate: `NAME:
@@ -48,8 +50,8 @@ SUBCOMMANDS:
 		Commands: []*cli.Command{
 			{
 				Name:        "dump",
-				Usage:       "Start eBPF-based DEX dumper",
-				Description: "Attach uprobes to libart and stream DEX/method events; provide either --uid or --name to filter.",
+				Usage:       "Start DEX dumper",
+				Description: "Attach probes to libart and stream DEX/method events; provide either --uid or --name to filter.",
 				CustomHelpTemplate: `NAME:
    {{.HelpName}} - {{.Usage}}
 
