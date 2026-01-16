@@ -79,6 +79,11 @@ OPTIONS:
 					&cli.BoolFlag{Name: "no-trigger-start", Usage: "Disable automatic launch trigger"},
 					&cli.Uint64Flag{Name: "trigger-delay-ms", Usage: "Delay (ms) before launch trigger", Value: 0},
 					&cli.IntFlag{Name: "trigger-monkey-events", Usage: "Monkey event count when falling back", Value: 1},
+					&cli.BoolFlag{Name: "scan-on-start", Usage: "Run memory scan after probes attach", Value: false},
+					&cli.Uint64Flag{Name: "scan-delay-ms", Usage: "Delay (ms) before memory scan", Value: 0},
+					&cli.Uint64Flag{Name: "scan-max-bytes", Usage: "Maximum bytes to scan per process", Value: 128 * 1024 * 1024},
+					&cli.IntFlag{Name: "scan-chunk-size", Usage: "Chunk size per read during scan", Value: 1 * 1024 * 1024},
+					&cli.IntFlag{Name: "scan-max-files", Usage: "Maximum dex files to dump per scan", Value: 64},
 					&cli.Uint64Flag{Name: "execute-offset", Usage: "Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)"},
 					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
 				},
@@ -97,6 +102,11 @@ OPTIONS:
 					triggerStart := c.Bool("trigger-start") && !c.Bool("no-trigger-start")
 					triggerDelay := c.Uint64("trigger-delay-ms")
 					triggerMonkeyEvents := c.Int("trigger-monkey-events")
+					scanOnStart := c.Bool("scan-on-start")
+					scanDelay := c.Uint64("scan-delay-ms")
+					scanMaxBytes := c.Uint64("scan-max-bytes")
+					scanChunkSize := c.Int("scan-chunk-size")
+					scanMaxFiles := c.Int("scan-max-files")
 
 					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -150,6 +160,31 @@ OPTIONS:
 						}()
 					} else if triggerStart {
 						logEvent("info", "trigger launch skipped (no package)", ErrCodeTriggerLaunch, nil)
+					}
+
+					if scanOnStart && uid != 0 {
+						go func() {
+							<-dumper.Ready()
+							if scanDelay > 0 {
+								time.Sleep(time.Duration(scanDelay) * time.Millisecond)
+							}
+							pids, err := FindPIDsByUID(uid)
+							if err != nil {
+								logEvent("warn", "memory scan skipped (no pids)", ErrCodeMemoryScan, LogField{
+									"uid": uid,
+									"err": err,
+								})
+								return
+							}
+							opts := DexScanOptions{
+								MaxBytes:  scanMaxBytes,
+								ChunkSize: scanChunkSize,
+								MaxFiles:  scanMaxFiles,
+							}
+							for _, pid := range pids {
+								dumper.ScanDexMemory(pid, opts)
+							}
+						}()
 					}
 
 					if autoStop && uid != 0 {

@@ -62,6 +62,11 @@ Attach uprobes to libart and stream DEX/method events. You must provide either `
 - `--no-trigger-start` - Disable automatic launch trigger
 - `--trigger-delay-ms` - Delay in milliseconds before triggering (default: 0)
 - `--trigger-monkey-events` - Monkey event count fallback (default: 1)
+- `--scan-on-start` - Run memory scan after probes attach (default: false)
+- `--scan-delay-ms` - Delay in milliseconds before scan (default: 0)
+- `--scan-max-bytes` - Max bytes to scan per process (default: 134217728)
+- `--scan-chunk-size` - Chunk size per scan read (default: 1048576)
+- `--scan-max-files` - Max dex files per scan (default: 64)
 - `--execute-offset <value>` - Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)
 - `--nterp-offset <value>` - Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)
 

@@ -405,6 +405,12 @@ func (dd *DexDumper) Stop() error {
 
 const numWorkers = 4 // 并行处理 worker 数量
 
+type DexScanOptions struct {
+	MaxBytes  uint64
+	ChunkSize int
+	MaxFiles  int
+}
+
 func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFix bool, executeOffset, nterpOffset uint64) *DexDumper {
 	outputPath = outputDir
 
@@ -432,6 +438,128 @@ func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFi
 
 func (dd *DexDumper) Ready() <-chan struct{} {
 	return dd.ready
+}
+
+func (dd *DexDumper) ScanDexMemory(pid int, opts DexScanOptions) {
+	if opts.MaxBytes <= 0 {
+		opts.MaxBytes = 128 * 1024 * 1024
+	}
+	if opts.ChunkSize <= 0 {
+		opts.ChunkSize = 1 * 1024 * 1024
+	}
+	if opts.MaxFiles <= 0 {
+		opts.MaxFiles = 64
+	}
+
+	logEvent("info", "memory scan start", ErrCodeMemoryScan, LogField{
+		"pid":       pid,
+		"max_bytes": opts.MaxBytes,
+		"chunk":     opts.ChunkSize,
+	})
+
+	maps, err := ReadProcMaps(pid)
+	if err != nil {
+		logEvent("warn", "read maps failed", ErrCodeMemoryScan, LogField{
+			"pid": pid,
+			"err": err,
+		})
+		return
+	}
+
+	var scanned uint64
+	found := 0
+	seen := make(map[uint64]struct{})
+
+	for _, m := range maps {
+		if !strings.Contains(m.Perms, "r") {
+			continue
+		}
+		if m.End <= m.Start {
+			continue
+		}
+		regionSize := m.End - m.Start
+		for offset := uint64(0); offset < regionSize; offset += uint64(opts.ChunkSize) {
+			if scanned >= opts.MaxBytes || found >= opts.MaxFiles {
+				logEvent("info", "memory scan limit reached", ErrCodeMemoryScan, LogField{
+					"pid":    pid,
+					"scanned": scanned,
+					"found":  found,
+				})
+				return
+			}
+			readSize := uint64(opts.ChunkSize)
+			if offset+readSize > regionSize {
+				readSize = regionSize - offset
+			}
+			buf, n := dd.readRemoteMemory(pid, m.Start+offset, int(readSize))
+			if n <= 0 {
+				continue
+			}
+			scanned += uint64(n)
+
+			for _, magic := range []string{"dex\n", "cdex"} {
+				idx := bytes.Index(buf, []byte(magic))
+				for idx >= 0 {
+					addr := m.Start + offset + uint64(idx)
+					if _, ok := seen[addr]; ok {
+						idxNext := bytes.Index(buf[idx+1:], []byte(magic))
+						if idxNext < 0 {
+							break
+						}
+						idx = idx + 1 + idxNext
+						continue
+					}
+					seen[addr] = struct{}{}
+
+					header, _ := dd.readRemoteMemory(pid, addr, 0x70)
+					size := ParseDexFileSize(header)
+					if size == 0 || size > maxDexSize {
+						logEvent("warn", "dex header size invalid", ErrCodeMemoryScan, LogField{
+							"pid":  pid,
+							"addr": fmt.Sprintf("0x%x", addr),
+							"size": size,
+						})
+					} else {
+						found++
+						logEvent("info", "dex magic found", ErrCodeMemoryScan, LogField{
+							"pid":  pid,
+							"addr": fmt.Sprintf("0x%x", addr),
+							"size": size,
+						})
+						dd.readRemoteDexFallback(addr, uint32(pid), size, 0)
+					}
+
+					idxNext := bytes.Index(buf[idx+1:], []byte(magic))
+					if idxNext < 0 {
+						break
+					}
+					idx = idx + 1 + idxNext
+				}
+			}
+		}
+	}
+
+	logEvent("info", "memory scan complete", ErrCodeMemoryScan, LogField{
+		"pid":    pid,
+		"scanned": scanned,
+		"found":  found,
+	})
+}
+
+func (dd *DexDumper) readRemoteMemory(pid int, addr uint64, size int) ([]byte, int) {
+	if size <= 0 {
+		return nil, 0
+	}
+	buf := make([]byte, size)
+	ret := C.readRemoteMem(C.pid_t(pid), unsafe.Pointer(&buf[0]), C.size_t(size), unsafe.Pointer(uintptr(addr)))
+	if ret <= 0 {
+		return nil, int(ret)
+	}
+	read := int(ret)
+	if read > size {
+		read = size
+	}
+	return buf[:read], read
 }
 
 // methodWorker 并行处理方法事件

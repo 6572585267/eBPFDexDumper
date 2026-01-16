@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/binary"
 	"bytes"
 	"compress/gzip"
 	"debug/elf"
@@ -17,6 +18,13 @@ import (
 )
 
 var execCommand = exec.Command
+
+type ProcMapEntry struct {
+	Start uint64
+	End   uint64
+	Perms string
+	Path  string
+}
 
 // ByteToString 将int8数组转换为字符串并去掉尾部零字节
 func ByteToString(bs []int8) string {
@@ -244,6 +252,116 @@ func IsUIDRunning(uid uint32) (bool, error) {
 		_ = file.Close()
 	}
 	return false, nil
+}
+
+func FindPIDsByUID(uid uint32) ([]int, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, fmt.Errorf("read /proc: %w", err)
+	}
+	var pids []int
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		statusPath := filepath.Join("/proc", entry.Name(), "status")
+		file, err := os.Open(statusPath)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "Uid:") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				break
+			}
+			realUID, err := strconv.ParseUint(fields[1], 10, 32)
+			if err == nil && uint32(realUID) == uid {
+				pids = append(pids, pid)
+			}
+			break
+		}
+		_ = file.Close()
+	}
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("no pids found for uid %d", uid)
+	}
+	return pids, nil
+}
+
+func ParseProcMaps(r io.Reader) ([]ProcMapEntry, error) {
+	var entries []ProcMapEntry
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		addrRange := strings.Split(fields[0], "-")
+		if len(addrRange) != 2 {
+			continue
+		}
+		start, err := strconv.ParseUint(addrRange[0], 16, 64)
+		if err != nil {
+			continue
+		}
+		end, err := strconv.ParseUint(addrRange[1], 16, 64)
+		if err != nil {
+			continue
+		}
+		path := ""
+		if len(fields) >= 6 {
+			path = strings.Join(fields[5:], " ")
+		}
+		entries = append(entries, ProcMapEntry{
+			Start: start,
+			End:   end,
+			Perms: fields[1],
+			Path:  path,
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func ReadProcMaps(pid int) ([]ProcMapEntry, error) {
+	file, err := os.Open(filepath.Join("/proc", strconv.Itoa(pid), "maps"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	return ParseProcMaps(file)
+}
+
+func DetectDexMagic(buf []byte) string {
+	if len(buf) >= 4 && string(buf[:4]) == "dex\n" {
+		return "dex"
+	}
+	if len(buf) >= 4 && string(buf[:4]) == "cdex" {
+		return "cdex"
+	}
+	return ""
+}
+
+func ParseDexFileSize(header []byte) uint32 {
+	if len(header) < 0x24 {
+		return 0
+	}
+	return binary.LittleEndian.Uint32(header[0x20:0x24])
 }
 
 // TriggerAppLaunch resolves and launches the app's main activity to trigger class loading.

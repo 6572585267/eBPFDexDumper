@@ -102,3 +102,45 @@ func TestTriggerAppLaunchMonkeyFallback(t *testing.T) {
 		t.Fatalf("expected monkey command with count, got %q", lastCmd)
 	}
 }
+
+func TestParseProcMaps(t *testing.T) {
+	data := "00400000-00452000 r-xp 00000000 08:02 12345 /system/bin/app_process64\n" +
+		"00652000-00653000 r--p 00052000 08:02 12345 /system/bin/app_process64\n"
+	entries, err := ParseProcMaps(strings.NewReader(data))
+	if err != nil {
+		t.Fatalf("ParseProcMaps error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Start != 0x00400000 || entries[0].End != 0x00452000 {
+		t.Fatalf("unexpected range: %#v", entries[0])
+	}
+	if entries[0].Perms != "r-xp" {
+		t.Fatalf("unexpected perms: %s", entries[0].Perms)
+	}
+}
+
+func TestDetectDexMagic(t *testing.T) {
+	if DetectDexMagic([]byte("dex\n035\x00")) != "dex" {
+		t.Fatalf("expected dex magic")
+	}
+	if DetectDexMagic([]byte("cdex001")) != "cdex" {
+		t.Fatalf("expected cdex magic")
+	}
+	if DetectDexMagic([]byte("xxxx")) != "" {
+		t.Fatalf("expected no magic")
+	}
+}
+
+func TestParseDexFileSize(t *testing.T) {
+	header := make([]byte, 0x40)
+	size := uint32(0x12345678)
+	header[0x20] = byte(size)
+	header[0x21] = byte(size >> 8)
+	header[0x22] = byte(size >> 16)
+	header[0x23] = byte(size >> 24)
+	if ParseDexFileSize(header) != size {
+		t.Fatalf("expected size %x", size)
+	}
+}

@@ -62,6 +62,11 @@ eBPFDexDumper [命令] [选项]
 - `--no-trigger-start` - 禁用自动拉起触发
 - `--trigger-delay-ms` - 触发前延迟毫秒数（默认值：0）
 - `--trigger-monkey-events` - fallback monkey 事件次数（默认值：1）
+- `--scan-on-start` - 探针附加后触发内存扫描（默认值：false）
+- `--scan-delay-ms` - 内存扫描延迟毫秒数（默认值：0）
+- `--scan-max-bytes` - 单进程最大扫描字节数（默认值：134217728）
+- `--scan-chunk-size` - 扫描读块大小（默认值：1048576）
+- `--scan-max-files` - 每次扫描最大转储文件数（默认值：64）
 - `--execute-offset <value>` - art::interpreter::Execute 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 - `--nterp-offset <value>` - ExecuteNterpImpl 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 

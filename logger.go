@@ -17,6 +17,7 @@ const (
 	ErrCodeTriggerLaunch   = 1100
 	ErrCodeAutoStop        = 1200
 	ErrCodeProbeLifecycle  = 1300
+	ErrCodeMemoryScan      = 1400
 )
 
 var logJSONOutput bool
