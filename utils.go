@@ -247,12 +247,15 @@ func IsUIDRunning(uid uint32) (bool, error) {
 }
 
 // TriggerAppLaunch resolves and launches the app's main activity to trigger class loading.
-func TriggerAppLaunch(pkg string) error {
+func TriggerAppLaunch(pkg string, monkeyEvents int) error {
 	component, err := ResolveLaunchActivity(pkg)
 	if err == nil && component != "" {
 		return execCommand("/system/bin/sh", "-c", "am start -n "+component).Run()
 	}
-	return execCommand("/system/bin/sh", "-c", "monkey -p "+pkg+" -c android.intent.category.LAUNCHER 1").Run()
+	if monkeyEvents <= 0 {
+		monkeyEvents = 1
+	}
+	return execCommand("/system/bin/sh", "-c", fmt.Sprintf("monkey -p %s -c android.intent.category.LAUNCHER %d", pkg, monkeyEvents)).Run()
 }
 
 // ResolveLaunchActivity tries to resolve the launchable activity component for a package.

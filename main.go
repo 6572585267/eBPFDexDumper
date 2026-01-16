@@ -77,6 +77,8 @@ OPTIONS:
 					&cli.BoolFlag{Name: "no-auto-stop", Usage: "Disable automatic stop on target exit"},
 					&cli.BoolFlag{Name: "trigger-start", Usage: "Trigger app launch after probes attach", Value: true},
 					&cli.BoolFlag{Name: "no-trigger-start", Usage: "Disable automatic launch trigger"},
+					&cli.Uint64Flag{Name: "trigger-delay-ms", Usage: "Delay (ms) before launch trigger", Value: 0},
+					&cli.IntFlag{Name: "trigger-monkey-events", Usage: "Monkey event count when falling back", Value: 1},
 					&cli.Uint64Flag{Name: "execute-offset", Usage: "Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)"},
 					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
 				},
@@ -93,6 +95,8 @@ OPTIONS:
 					nterpOffset := c.Uint64("nterp-offset")
 					autoStop := c.Bool("auto-stop") && !c.Bool("no-auto-stop")
 					triggerStart := c.Bool("trigger-start") && !c.Bool("no-trigger-start")
+					triggerDelay := c.Uint64("trigger-delay-ms")
+					triggerMonkeyEvents := c.Int("trigger-monkey-events")
 
 					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -130,7 +134,10 @@ OPTIONS:
 					if triggerStart && pkgName != "" {
 						go func() {
 							<-dumper.Ready()
-							if err := TriggerAppLaunch(pkgName); err != nil {
+							if triggerDelay > 0 {
+								time.Sleep(time.Duration(triggerDelay) * time.Millisecond)
+							}
+							if err := TriggerAppLaunch(pkgName, triggerMonkeyEvents); err != nil {
 								logEvent("warn", "trigger launch failed", ErrCodeTriggerLaunch, LogField{
 									"pkg": pkgName,
 									"err": err,

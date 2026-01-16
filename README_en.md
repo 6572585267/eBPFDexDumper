@@ -60,6 +60,8 @@ Attach uprobes to libart and stream DEX/method events. You must provide either `
 - `--no-auto-stop` - Disable automatic stop on target exit
 - `--trigger-start` - Launch the app after probes attach (default: **true**)
 - `--no-trigger-start` - Disable automatic launch trigger
+- `--trigger-delay-ms` - Delay in milliseconds before triggering (default: 0)
+- `--trigger-monkey-events` - Monkey event count fallback (default: 1)
 - `--execute-offset <value>` - Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)
 - `--nterp-offset <value>` - Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)
 

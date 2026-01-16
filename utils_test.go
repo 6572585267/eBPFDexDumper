@@ -69,10 +69,36 @@ func TestTriggerAppLaunchUsesResolvedActivity(t *testing.T) {
 		}
 	}
 
-	if err := TriggerAppLaunch("com.example"); err != nil {
+	if err := TriggerAppLaunch("com.example", 1); err != nil {
 		t.Fatalf("TriggerAppLaunch failed: %v", err)
 	}
 	if !strings.Contains(lastCmd, "am start -n") {
 		t.Fatalf("expected am start command, got %q", lastCmd)
+	}
+}
+
+func TestTriggerAppLaunchMonkeyFallback(t *testing.T) {
+	originalExec := execCommand
+	defer func() { execCommand = originalExec }()
+
+	var lastCmd string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cmdLine := name + " " + strings.Join(args, " ")
+		lastCmd = cmdLine
+		switch {
+		case strings.Contains(cmdLine, "cmd package resolve-activity --brief"):
+			return exec.Command("sh", "-c", "false")
+		case strings.Contains(cmdLine, "monkey -p"):
+			return exec.Command("sh", "-c", "true")
+		default:
+			return exec.Command("sh", "-c", "true")
+		}
+	}
+
+	if err := TriggerAppLaunch("com.example", 3); err != nil {
+		t.Fatalf("TriggerAppLaunch fallback failed: %v", err)
+	}
+	if !strings.Contains(lastCmd, "monkey -p com.example") || !strings.Contains(lastCmd, " 3") {
+		t.Fatalf("expected monkey command with count, got %q", lastCmd)
 	}
 }
