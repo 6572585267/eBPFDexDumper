@@ -144,3 +144,21 @@ func TestParseDexFileSize(t *testing.T) {
 		t.Fatalf("expected size %x", size)
 	}
 }
+
+func TestRunShellCommand(t *testing.T) {
+	originalExec := execCommand
+	defer func() { execCommand = originalExec }()
+
+	var lastCmd string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		lastCmd = name + " " + strings.Join(args, " ")
+		return exec.Command("sh", "-c", "true")
+	}
+
+	if err := RunShellCommand("echo test"); err != nil {
+		t.Fatalf("RunShellCommand failed: %v", err)
+	}
+	if !strings.Contains(lastCmd, "echo test") {
+		t.Fatalf("expected command to be executed, got %q", lastCmd)
+	}
+}

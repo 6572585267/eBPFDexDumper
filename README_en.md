@@ -67,6 +67,7 @@ Attach uprobes to libart and stream DEX/method events. You must provide either `
 - `--scan-max-bytes` - Max bytes to scan per process (default: 134217728)
 - `--scan-chunk-size` - Chunk size per scan read (default: 1048576)
 - `--scan-max-files` - Max dex files per scan (default: 64)
+- `--classloader-cmd` - Run a custom ClassLoader trigger command after attach
 - `--execute-offset <value>` - Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)
 - `--nterp-offset <value>` - Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)
 

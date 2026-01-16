@@ -84,6 +84,7 @@ OPTIONS:
 					&cli.Uint64Flag{Name: "scan-max-bytes", Usage: "Maximum bytes to scan per process", Value: 128 * 1024 * 1024},
 					&cli.IntFlag{Name: "scan-chunk-size", Usage: "Chunk size per read during scan", Value: 1 * 1024 * 1024},
 					&cli.IntFlag{Name: "scan-max-files", Usage: "Maximum dex files to dump per scan", Value: 64},
+					&cli.StringFlag{Name: "classloader-cmd", Usage: "Shell command to trigger ClassLoader/DexClassLoader loading"},
 					&cli.Uint64Flag{Name: "execute-offset", Usage: "Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)"},
 					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
 				},
@@ -107,6 +108,7 @@ OPTIONS:
 					scanMaxBytes := c.Uint64("scan-max-bytes")
 					scanChunkSize := c.Int("scan-chunk-size")
 					scanMaxFiles := c.Int("scan-max-files")
+					classloaderCmd := c.String("classloader-cmd")
 
 					// 预先创建输出目录，避免后续写文件失败
 					if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -183,6 +185,22 @@ OPTIONS:
 							}
 							for _, pid := range pids {
 								dumper.ScanDexMemory(pid, opts)
+							}
+						}()
+					}
+
+					if classloaderCmd != "" {
+						go func() {
+							<-dumper.Ready()
+							if err := RunShellCommand(classloaderCmd); err != nil {
+								logEvent("warn", "classloader command failed", ErrCodeTriggerLaunch, LogField{
+									"cmd": classloaderCmd,
+									"err": err,
+								})
+							} else {
+								logEvent("info", "classloader command completed", ErrCodeTriggerLaunch, LogField{
+									"cmd": classloaderCmd,
+								})
 							}
 						}()
 					}

@@ -364,6 +364,13 @@ func ParseDexFileSize(header []byte) uint32 {
 	return binary.LittleEndian.Uint32(header[0x20:0x24])
 }
 
+func RunShellCommand(cmd string) error {
+	if strings.TrimSpace(cmd) == "" {
+		return fmt.Errorf("empty command")
+	}
+	return execCommand("/system/bin/sh", "-c", cmd).Run()
+}
+
 // TriggerAppLaunch resolves and launches the app's main activity to trigger class loading.
 func TriggerAppLaunch(pkg string, monkeyEvents int) error {
 	component, err := ResolveLaunchActivity(pkg)

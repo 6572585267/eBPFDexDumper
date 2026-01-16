@@ -67,6 +67,7 @@ eBPFDexDumper [命令] [选项]
 - `--scan-max-bytes` - 单进程最大扫描字节数（默认值：134217728）
 - `--scan-chunk-size` - 扫描读块大小（默认值：1048576）
 - `--scan-max-files` - 每次扫描最大转储文件数（默认值：64）
+- `--classloader-cmd` - 启动后执行自定义 ClassLoader 触发命令
 - `--execute-offset <value>` - art::interpreter::Execute 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 - `--nterp-offset <value>` - ExecuteNterpImpl 函数的手动偏移量（十六进制值，例如 0x12345）(不指定参数会自动寻找)
 
