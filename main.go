@@ -8,8 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
-	"time"
 
 	cli "github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
@@ -23,7 +21,7 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	app := &cli.App{
-		Name:  "dexdump",
+		Name:  "eBPFDexDumper",
 		Usage: "Dump in-memory DEX and method bytecode or fix dumped DEX files",
 		// 自定义帮助模板：精简顶层信息并展示子命令详情
 		CustomAppHelpTemplate: `NAME:
@@ -50,8 +48,8 @@ SUBCOMMANDS:
 		Commands: []*cli.Command{
 			{
 				Name:        "dump",
-				Usage:       "Start DEX dumper",
-				Description: "Attach probes to libart and stream DEX/method events; provide either --uid or --name to filter.",
+				Usage:       "Start eBPF-based DEX dumper",
+				Description: "Attach uprobes to libart and stream DEX/method events; provide either --uid or --name to filter.",
 				CustomHelpTemplate: `NAME:
    {{.HelpName}} - {{.Usage}}
 
@@ -74,18 +72,16 @@ OPTIONS:
 					&cli.BoolFlag{Name: "auto-fix", Aliases: []string{"f"}, Usage: "Automatically fix DEX files after dumping", Value: true},
 					&cli.BoolFlag{Name: "no-clean-oat", Usage: "Disable automatic oat cleaning"},
 					&cli.BoolFlag{Name: "no-auto-fix", Usage: "Disable automatic DEX fixing"},
-					&cli.Uint64Flag{Name: "execute-offset", Usage: "Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)"},
-					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
+					&cli.BoolFlag{Name: "log-json", Usage: "Output structured JSON logs"},
 					&cli.BoolFlag{Name: "auto-stop", Usage: "Stop automatically when target process exits", Value: true},
 					&cli.BoolFlag{Name: "no-auto-stop", Usage: "Disable automatic stop on target exit"},
-					&cli.StringSliceFlag{Name: "filter-prefix", Usage: "Filter method classes by prefix (repeatable)"},
-					&cli.BoolFlag{Name: "no-filter-sdk", Usage: "Disable default SDK/system prefix filtering"},
 					&cli.BoolFlag{Name: "trigger-start", Usage: "Trigger app launch after probes attach", Value: true},
 					&cli.BoolFlag{Name: "no-trigger-start", Usage: "Disable automatic launch trigger"},
+					&cli.Uint64Flag{Name: "execute-offset", Usage: "Manual offset for art::interpreter::Execute function (hex value, e.g. 0x12345)"},
+					&cli.Uint64Flag{Name: "nterp-offset", Usage: "Manual offset for ExecuteNterpImpl function (hex value, e.g. 0x12345)"},
 				},
 				Action: func(c *cli.Context) error {
-					fmt.Println("提示：本文件仅供学习参考请24小时内删除，编译人@rc4aes和testing,来自爱国人士交流群")
-
+					logJSONOutput = c.Bool("log-json")
 					uid := uint32(c.Uint64("uid"))
 					pkgName := c.String("name")
 					libArtPath := c.String("libart")
@@ -96,7 +92,6 @@ OPTIONS:
 					executeOffset := c.Uint64("execute-offset")
 					nterpOffset := c.Uint64("nterp-offset")
 					autoStop := c.Bool("auto-stop") && !c.Bool("no-auto-stop")
-					filterPrefixes := buildFilterPrefixes(c)
 					triggerStart := c.Bool("trigger-start") && !c.Bool("no-trigger-start")
 
 					// 预先创建输出目录，避免后续写文件失败
@@ -127,7 +122,7 @@ OPTIONS:
 					}
 
 					// 创建并启动DexDumper
-					dumper := NewDexDumper(libArtPath, uid, outputDir, trace, autoFix, executeOffset, nterpOffset, filterPrefixes)
+					dumper := NewDexDumper(libArtPath, uid, outputDir, trace, autoFix, executeOffset, nterpOffset)
 
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
@@ -136,11 +131,18 @@ OPTIONS:
 						go func() {
 							<-dumper.Ready()
 							if err := TriggerAppLaunch(pkgName); err != nil {
-								log.Printf("[trigger] failed to launch %s: %v", pkgName, err)
+								logEvent("warn", "trigger launch failed", ErrCodeTriggerLaunch, LogField{
+									"pkg": pkgName,
+									"err": err,
+								})
+							} else {
+								logEvent("info", "trigger launch ok", ErrCodeTriggerLaunch, LogField{
+									"pkg": pkgName,
+								})
 							}
 						}()
 					} else if triggerStart {
-						log.Printf("[trigger] skipped (no package name)")
+						logEvent("info", "trigger launch skipped (no package)", ErrCodeTriggerLaunch, nil)
 					}
 
 					if autoStop && uid != 0 {
@@ -154,11 +156,16 @@ OPTIONS:
 								case <-ticker.C:
 									running, err := IsUIDRunning(uid)
 									if err != nil {
-										log.Printf("[auto-stop] failed to check uid %d: %v", uid, err)
+										logEvent("warn", "auto-stop check failed", ErrCodeAutoStop, LogField{
+											"uid": uid,
+											"err": err,
+										})
 										continue
 									}
 									if !running {
-										log.Printf("[auto-stop] target uid %d exited, stopping...", uid)
+										logEvent("info", "auto-stop triggered (uid exited)", ErrCodeAutoStop, LogField{
+											"uid": uid,
+										})
 										cancel()
 										return
 									}
@@ -192,7 +199,7 @@ OPTIONS:
 					if err := dumper.Stop(); err != nil {
 						log.Printf("Failed to stop dumper cleanly: %v", err)
 					}
-					log.Println("dexdump finished")
+					logEvent("info", "dumper stopped", ErrCodeProbeLifecycle, nil)
 					return nil
 				},
 			},
@@ -234,41 +241,4 @@ OPTIONS:
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func buildFilterPrefixes(c *cli.Context) []string {
-	defaultPrefixes := []string{
-		"android.",
-		"com.google.",
-		"com.android.",
-		"org.apache.",
-		"com.facebook.",
-		"com.tencent.",
-		"com.microsoft.",
-	}
-	var prefixes []string
-	if !c.Bool("no-filter-sdk") {
-		prefixes = append(prefixes, defaultPrefixes...)
-	}
-	for _, prefix := range c.StringSlice("filter-prefix") {
-		normalized := normalizePrefix(prefix)
-		if normalized != "" {
-			prefixes = append(prefixes, normalized)
-		}
-	}
-	return prefixes
-}
-
-func normalizePrefix(prefix string) string {
-	prefix = strings.TrimSpace(prefix)
-	prefix = strings.TrimPrefix(prefix, "L")
-	prefix = strings.TrimSuffix(prefix, ";")
-	prefix = strings.ReplaceAll(prefix, "/", ".")
-	if prefix == "" {
-		return ""
-	}
-	if !strings.HasSuffix(prefix, ".") {
-		prefix += "."
-	}
-	return prefix
 }

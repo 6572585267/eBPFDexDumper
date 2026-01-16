@@ -16,6 +16,8 @@ import (
 	"syscall"
 )
 
+var execCommand = exec.Command
+
 // ByteToString 将int8数组转换为字符串并去掉尾部零字节
 func ByteToString(bs []int8) string {
 	ba := make([]byte, 0, len(bs))
@@ -42,11 +44,14 @@ func CheckConfig(targetStr string) bool {
 	}
 	defer func() { _ = gzReader.Close() }()
 
-	scanner := bufio.NewScanner(gzReader)
+	return checkConfigFromReader(gzReader, targetStr)
+}
+
+func checkConfigFromReader(r io.Reader, targetStr string) bool {
+	scanner := bufio.NewScanner(r)
 	target := []byte(targetStr)
 	for scanner.Scan() {
 		if bytes.Contains(scanner.Bytes(), target) {
-			// fmt.Println(scanner.Text())
 			return true
 		}
 	}
@@ -94,7 +99,7 @@ func LookupUIDByPackageName(pkg string) (uint32, error) {
 	}
 
 	// 2) Fallback: cmd package list packages -U (Android 10+)
-	if out, err := exec.Command("/system/bin/sh", "-c", "cmd package list packages -U").Output(); err == nil {
+	if out, err := execCommand("/system/bin/sh", "-c", "cmd package list packages -U").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
 			// Example: "package:com.foo uid:10080"
@@ -168,7 +173,7 @@ func LookupPackagesByUID(uid uint32) ([]string, error) {
 	}
 
 	// 2) cmd package list packages -U
-	if out, err := exec.Command("/system/bin/sh", "-c", "cmd package list packages -U").Output(); err == nil {
+	if out, err := execCommand("/system/bin/sh", "-c", "cmd package list packages -U").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
 			// Example: "package:com.foo uid:10080"
@@ -198,6 +203,75 @@ func LookupPackagesByUID(uid uint32) ([]string, error) {
 	}
 
 	return nil, fmt.Errorf("no packages found for uid %d", uid)
+}
+
+// IsUIDRunning checks if any process with the given UID is currently running.
+func IsUIDRunning(uid uint32) (bool, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false, fmt.Errorf("read /proc: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		statusPath := filepath.Join("/proc", entry.Name(), "status")
+		file, err := os.Open(statusPath)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "Uid:") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				break
+			}
+			realUID, err := strconv.ParseUint(fields[1], 10, 32)
+			if err == nil && uint32(realUID) == uid {
+				_ = file.Close()
+				return true, nil
+			}
+			break
+		}
+		_ = file.Close()
+	}
+	return false, nil
+}
+
+// TriggerAppLaunch resolves and launches the app's main activity to trigger class loading.
+func TriggerAppLaunch(pkg string) error {
+	component, err := ResolveLaunchActivity(pkg)
+	if err == nil && component != "" {
+		return execCommand("/system/bin/sh", "-c", "am start -n "+component).Run()
+	}
+	return execCommand("/system/bin/sh", "-c", "monkey -p "+pkg+" -c android.intent.category.LAUNCHER 1").Run()
+}
+
+// ResolveLaunchActivity tries to resolve the launchable activity component for a package.
+func ResolveLaunchActivity(pkg string) (string, error) {
+	out, err := execCommand("/system/bin/sh", "-c", "cmd package resolve-activity --brief "+pkg).Output()
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "/") {
+			return line, nil
+		}
+	}
+	return "", fmt.Errorf("no launchable activity for %s", pkg)
 }
 
 // pmPathsForPackage 读取 pm path <pkg> 输出的APK路径列表。
@@ -265,75 +339,6 @@ func RemoveOatDirsByUID(uid uint32) {
 	for _, pkg := range pkgs {
 		RemoveOatDirsForPackage(pkg)
 	}
-}
-
-// IsUIDRunning checks if any process with the given UID is currently running.
-func IsUIDRunning(uid uint32) (bool, error) {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return false, fmt.Errorf("read /proc: %w", err)
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 {
-			continue
-		}
-		statusPath := filepath.Join("/proc", entry.Name(), "status")
-		file, err := os.Open(statusPath)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "Uid:") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				break
-			}
-			realUID, err := strconv.ParseUint(fields[1], 10, 32)
-			if err == nil && uint32(realUID) == uid {
-				_ = file.Close()
-				return true, nil
-			}
-			break
-		}
-		_ = file.Close()
-	}
-	return false, nil
-}
-
-// TriggerAppLaunch resolves and launches the app's main activity to trigger class loading.
-func TriggerAppLaunch(pkg string) error {
-	component, err := ResolveLaunchActivity(pkg)
-	if err == nil && component != "" {
-		return exec.Command("/system/bin/sh", "-c", "am start -n "+component).Run()
-	}
-	return exec.Command("/system/bin/sh", "-c", "monkey -p "+pkg+" -c android.intent.category.LAUNCHER 1").Run()
-}
-
-// ResolveLaunchActivity tries to resolve the launchable activity component for a package.
-func ResolveLaunchActivity(pkg string) (string, error) {
-	out, err := exec.Command("/system/bin/sh", "-c", "cmd package resolve-activity --brief "+pkg).Output()
-	if err != nil {
-		return "", err
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, "/") {
-			return line, nil
-		}
-	}
-	return "", fmt.Errorf("no launchable activity for %s", pkg)
 }
 
 func findPatternUAddrs(path string, pattern []byte) ([]uint64, error) {

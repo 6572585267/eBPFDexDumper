@@ -70,8 +70,8 @@ type DexDumper struct {
 	autoFix       bool
 	executeOffset uint64
 	nterpOffset   uint64
-	filterPrefixes []string
-	ready          chan struct{}
+	readyOnce     sync.Once
+	ready         chan struct{}
 
 	// 使用sync.Map减少锁竞争（key: methodSigKey）
 	methodSigCache sync.Map // key: methodSigKey, value: string
@@ -359,8 +359,12 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start manager: %v", err)
 	}
 
-	log.Printf("dexdump started successfully")
-	close(dd.ready)
+	logEvent("info", "dumper started", ErrCodeProbeLifecycle, LogField{
+		"uid": dd.uid,
+	})
+	dd.readyOnce.Do(func() {
+		close(dd.ready)
+	})
 
 	// 等待停止信号
 	<-ctx.Done()
@@ -370,7 +374,7 @@ func (dd *DexDumper) Start(ctx context.Context) error {
 
 // Stop 停止 DexDumper
 func (dd *DexDumper) Stop() error {
-	log.Printf("Stopping dexdump")
+	logEvent("info", "dumper stopping", ErrCodeProbeLifecycle, nil)
 
 	// 标记停止，阻止新事件进入
 	dd.stopped.Store(true)
@@ -401,7 +405,7 @@ func (dd *DexDumper) Stop() error {
 
 const numWorkers = 4 // 并行处理 worker 数量
 
-func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFix bool, executeOffset, nterpOffset uint64, filterPrefixes []string) *DexDumper {
+func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFix bool, executeOffset, nterpOffset uint64) *DexDumper {
 	outputPath = outputDir
 
 	dd := &DexDumper{
@@ -411,7 +415,6 @@ func NewDexDumper(libArtPath string, uid uint32, outputDir string, trace, autoFi
 		autoFix:        autoFix,
 		executeOffset:  executeOffset,
 		nterpOffset:    nterpOffset,
-		filterPrefixes: filterPrefixes,
 		ready:          make(chan struct{}),
 		dexSizes:       make(map[uint64]uint32),
 		pendingDex:     make(map[uint64]*dexRecvState),
@@ -527,10 +530,6 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 		}
 	}
 
-	if dd.shouldFilterMethod(methodName) {
-		return
-	}
-
 	if methodHeader.CodeitemSize > 0 {
 		if dd.trace {
 			// trace模式下输出方法执行信息，便于实时定位
@@ -567,31 +566,6 @@ func (dd *DexDumper) processMethodEvent(data []byte) {
 				methodHeader.ArtMethodPtr)
 		}
 	}
-}
-
-func (dd *DexDumper) shouldFilterMethod(methodName string) bool {
-	if len(dd.filterPrefixes) == 0 {
-		return false
-	}
-	if strings.HasPrefix(methodName, "method_idx_") {
-		return false
-	}
-	parts := strings.SplitN(methodName, " ", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	signature := parts[1]
-	lastDot := strings.LastIndex(signature, ".")
-	if lastDot <= 0 {
-		return false
-	}
-	className := signature[:lastDot]
-	for _, prefix := range dd.filterPrefixes {
-		if strings.HasPrefix(className, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func (dd *DexDumper) flushJSON() {
